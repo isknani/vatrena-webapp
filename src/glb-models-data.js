@@ -40,7 +40,7 @@ vatrenaCabinets.push({ name: '100', path: 'vatrena/v7d.glb', thumbnail: 'thumbna
 vatrenaCabinets.push({ name: '100', path: 'vatrena/v8d.glb', thumbnail: 'thumbnails_vatrena/v8d.webp' });
 vatrenaCabinets.push({ name: '100', path: 'vatrena/v9d.glb', thumbnail: 'thumbnails_vatrena/v9d.webp' });
 vatrenaCabinets.push({ name: '100', path: 'vatrena/v10d.glb', thumbnail: 'thumbnails_vatrena/v10d.webp' });
-
+vatrenaCabinets.push({ name: '100', path: 'vatrena/v11d.glb', thumbnail: 'thumbnails_vatrena/v11d.webp' });
 
 
 vatrenaCabinets.push({ name: 'ستربات', path: 'PROCEDURAL_SLAT', thumbnail: 'thumbnails_vatrena/mdf.webp' });
