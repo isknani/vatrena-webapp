@@ -1,0 +1,23 @@
+{
+  "name": "threejs-journey-exercise",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+   "scripts": {
+    "dev": "vite",
+    "build": "vite build && node add-php-header.js",
+    "preview": "vite preview",
+    "postinstall": "node patch-gltf-exporter.js"
+},
+  "devDependencies": {
+    "vite": "^6.2.2",
+    "vite-plugin-restart": "^0.4.2"
+  },
+  "dependencies": {
+    "three": "^0.174.0",
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/extensions": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0",
+    "draco3dgltf": "^1.5.7"
+  }
+}
