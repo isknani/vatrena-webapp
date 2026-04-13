@@ -21,10 +21,14 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { initRenderSystem } from './render-engine.js';
 import { SketchShader, SharpenShader } from './shaders-config.js';
+import { TTFLoader } from 'three/examples/jsm/loaders/TTFLoader.js';
+import { Font } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import {
     heightException88,
     heightException110,
     vatrenaCabinets,
+    middleVatrenaCabinets,
     receptionCabinets,
     electricalAppliances,
     accessoriesList,
@@ -87,6 +91,7 @@ let walls = [];
 let isDragging = false;
 let doubleClickTimeout = null;
 let cabinetBeingEdited = null;
+let sceneTextScaleEditing = null;
 let originalBackgroundTexture = null;
 // --- متغيرات نظام السحب الدقيق (الجديدة) ---
 const dragPlane = new THREE.Plane();
@@ -160,6 +165,7 @@ const ftColorMenu = document.getElementById('ft-color-menu');
 if (ftColorBtn && ftColorMenu) {
     ftColorBtn.addEventListener('click', (e) => {
         e.stopPropagation(); // يمنع إغلاق القائمة فوراً
+        if (selectedObject?.name === 'scene-text') return; // النص له ألوان ثابتة من لوحة الإضافة
         ftColorMenu.classList.toggle('show');
     });
 }
@@ -221,6 +227,10 @@ const cabinetDepthInput = document.getElementById('cabinet-depth');
 const cabinetHeightInput = document.getElementById('cabinet-height');
 const applyDimensionsBtn = document.getElementById('apply-dimensions');
 const cancelDimensionsBtn = document.getElementById('cancel-dimensions');
+const sceneTextScalePopup = document.getElementById('scene-text-scale-popup');
+const sceneTextScaleInput = document.getElementById('scene-text-scale-input');
+const applySceneTextScaleBtn = document.getElementById('apply-scene-text-scale');
+const cancelSceneTextScaleBtn = document.getElementById('cancel-scene-text-scale');
 const newRoomHeightInput = document.getElementById('new-room-height');
 
 // --- Room Dimensions Popup ---
@@ -568,7 +578,7 @@ function applyCabinetTexture(object, targetName, textureName) {
 
 // دالة لتطبيق خامات الأرضية والحوائط (التي تستخدم مسار الصورة المباشر) على الكابينة
 function applyPathToCabinetMaterial(object, texturePath, customGroup = null) {
-    const targetMat = (object.name.includes('attached') || object.name === 'double-attached-cabinet') ? 'up' : 'ground';
+    const targetMat = cabinetBodyMaterialSlot(object);
     
     // >>> التعديل السحري: قراءة الأبعاد الأصلية للكابينة لمنع تخريب النقشة عند التدوير <<<
     let cabW = 0.6, cabH = 0.8;
@@ -637,7 +647,8 @@ function changeAllFloorCabinetsTexture(textureName) {
         // 🌟 شمول الإزارة في عملية البحث وتغيير اللون
         if (isCabinet(object) || object.name === 'baseboard') {
             const group = object.userData.customColorGroup || object.name;
-            if (group === 'floor-cabinet' || group === 'pantry-cabinet' || group === 'floor' || group === 'baseboard') { 
+            if (group === 'floor-cabinet' || group === 'pantry-cabinet' || group === 'floor' || group === 'baseboard' ||
+                isReceptionCabinetGroup(object)) {
                 affected.push(object);
             } 
         }
@@ -647,8 +658,7 @@ function changeAllFloorCabinetsTexture(textureName) {
     
     currentFloorCabinetTexture = textureName; 
     affected.forEach((object) => {
-        const targetMat = (object.name.includes('attached') || object.name === 'double-attached-cabinet') ? 'up' : 'ground';
-        applyCabinetTexture(object, targetMat, textureName); 
+        applyCabinetTexture(object, cabinetBodyMaterialSlot(object), textureName); 
     });
 }
 
@@ -658,7 +668,7 @@ function changeAllAttachedCabinetsTexture(textureName) {
     scene.traverse((object) => { 
         if (isCabinet(object)) {
             const group = object.userData.customColorGroup || object.name;
-            if (group === 'attached-cabinet' || group === 'attached') { 
+            if ((group === 'attached-cabinet' || group === 'attached') && !isReceptionCabinetGroup(object)) {
                 affected.push(object);
             } 
         }
@@ -668,8 +678,7 @@ function changeAllAttachedCabinetsTexture(textureName) {
     
     currentAttachedCabinetTexture = textureName; 
     affected.forEach((object) => {
-        const targetMat = (object.name.includes('attached') || object.name === 'double-attached-cabinet') ? 'up' : 'ground';
-        applyCabinetTexture(object, targetMat, textureName); 
+        applyCabinetTexture(object, cabinetBodyMaterialSlot(object), textureName); 
     });
 }
 
@@ -688,8 +697,7 @@ function changeAllDoubleAttachedCabinetsTexture(textureName) {
     
     currentDoubleAttachedCabinetTexture = textureName; 
     affected.forEach((object) => {
-        const targetMat = (object.name.includes('attached') || object.name === 'double-attached-cabinet') ? 'up' : 'ground';
-        applyCabinetTexture(object, targetMat, textureName); 
+        applyCabinetTexture(object, cabinetBodyMaterialSlot(object), textureName); 
     });
 }
 
@@ -719,6 +727,242 @@ function isCabinet(object) {
         object.name === 'appliance' // ⚡ تم إضافة الأجهزة هنا
     );
 }
+
+/** رسبشن (static/resption/): نفس خامة ولون الفاترينات الأرضية على مادة ground وليس ملحق up */
+function isReceptionCabinetGroup(object) {
+    if (!object || object.name !== 'attached-cabinet') return false;
+    const p = (object.userData?.modelPath || '').toString().split('?')[0];
+    return p.includes('resption/');
+}
+
+function cabinetBodyMaterialSlot(object) {
+    if (isReceptionCabinetGroup(object)) return 'ground';
+    if (object.name.includes('attached') || object.name === 'double-attached-cabinet') return 'up';
+    return 'ground';
+}
+
+/** علامة حفظ/تراجع لنص المشهد (ليس ملف GLB) */
+const SCENE_TEXT_MODEL_PATH = 'SCENE_TEXT_LABEL';
+
+function isSceneLayoutObject(object) {
+    return Boolean(object && (isCabinet(object) || object.name === 'scene-text'));
+}
+
+function sceneTextFillCss(colorKey) {
+    if (colorKey === 'gold') return '#c9a227';
+    if (colorKey === 'steel') return '#9aa5b0';
+    return '#121212';
+}
+
+function sceneTextPbrForColorKey(colorKey) {
+    const metal = colorKey === 'steel' ? 0.35 : 0.05;
+    const rough = colorKey === 'steel' ? 0.4 : 0.55;
+    return {
+        color: new THREE.Color(sceneTextFillCss(colorKey)),
+        roughness: rough,
+        metalness: metal,
+    };
+}
+
+/** تحديث لون خامة نص المشهد (بدون إعادة بناء الهندسة) + حفظ colorKey للتصدير */
+function applySceneTextMaterialColor(group, colorKey) {
+    if (!group || group.name !== 'scene-text') return;
+    const key = colorKey === 'gold' || colorKey === 'steel' ? colorKey : 'black';
+    const { color, roughness, metalness } = sceneTextPbrForColorKey(key);
+    group.traverse((ch) => {
+        if (ch.isMesh && ch.material && !Array.isArray(ch.material)) {
+            ch.material.color.copy(color);
+            ch.material.roughness = roughness;
+            ch.material.metalness = metalness;
+            ch.material.needsUpdate = true;
+        }
+    });
+    if (!group.userData.sceneTextPayload) group.userData.sceneTextPayload = { text: '', colorKey: key };
+    else group.userData.sceneTextPayload.colorKey = key;
+}
+
+/** عند تحديد نص مشهد: تعبئة حقل النص ومربعات اللون من البيانات المحفوظة */
+function syncAddTextPanelFromSelection() {
+    const input = document.getElementById('scene-text-input');
+    if (!input) return;
+    const grp = selectedObject?.name === 'scene-text' ? selectedObject : null;
+    if (grp?.userData?.sceneTextPayload) {
+        const pl = grp.userData.sceneTextPayload;
+        input.value = pl.text != null ? String(pl.text) : '';
+        const ck = pl.colorKey === 'gold' || pl.colorKey === 'steel' ? pl.colorKey : 'black';
+        document.querySelectorAll('input[name="scene-text-color"]').forEach((inp) => {
+            inp.checked = inp.value === ck;
+        });
+    }
+}
+
+const SCENE_TEXT_FONT_URL = `${import.meta.env.BASE_URL}fonts/Cairo-Variable.ttf`;
+let sceneTextFontPromise = null;
+
+async function loadSceneTextFont() {
+    if (sceneTextFontPromise) return sceneTextFontPromise;
+    sceneTextFontPromise = (async () => {
+        const res = await fetch(SCENE_TEXT_FONT_URL);
+        if (!res.ok) throw new Error(`فشل تحميل خط النص (${res.status})`);
+        const buf = await res.arrayBuffer();
+        const ttfLoader = new TTFLoader();
+        const json = ttfLoader.parse(buf);
+        return new Font(json);
+    })();
+    return sceneTextFontPromise;
+}
+
+/** ترتيب الحروف لـ TextGeometry (Three يبني من اليسار؛ العربية نعكس تسلسل الكودات للقراءة المرئية) */
+function prepareTextForSceneFont(text) {
+    const hasArabic = /[\u0600-\u06FF\u0750-\u077F]/.test(text);
+    if (!hasArabic) return text;
+    return Array.from(text).reverse().join('');
+}
+
+/** نص ثلاثي الأبعاد: بروز الحروف فقط بسمك 2 سم (بدون مستطيل/لوحة) عبر TextGeometry وخط Cairo */
+async function createSceneTextGroup(textRaw, colorKey) {
+    const text = (textRaw || '').trim().slice(0, 40);
+    if (!text) return null;
+
+    const { color: inkColor, roughness: rough, metalness: metal } = sceneTextPbrForColorKey(colorKey);
+
+    let font;
+    try {
+        font = await loadSceneTextFont();
+    } catch (e) {
+        console.error(e);
+        alert('تعذر تحميل خط النص ثلاثي الأبعاد. تأكد من وجود الملف fonts/Cairo-Variable.ttf في المشروع.');
+        return null;
+    }
+
+    const shaped = prepareTextForSceneFont(text);
+    const TARGET_H = 0.22;
+    const TARGET_D = 0.02;
+    const curveSegments = 6;
+
+    let measureGeo;
+    try {
+        measureGeo = new TextGeometry(shaped, {
+            font,
+            size: 1,
+            depth: 0.001,
+            curveSegments,
+            bevelEnabled: false,
+        });
+    } catch (e) {
+        console.error(e);
+        alert('حرف أو أكثر غير مدعوم في خط النص ثلاثي الأبعاد.');
+        return null;
+    }
+    measureGeo.computeBoundingBox();
+    const mb = measureGeo.boundingBox;
+    const h = mb.max.y - mb.min.y;
+    measureGeo.dispose();
+    if (h < 1e-6) {
+        alert('تعذر إنشاء شكل النص (ارتفاع الصفر). جرّب نصاً آخر أو أحرفاً أخرى.');
+        return null;
+    }
+    const s = TARGET_H / h;
+    const depthForExtrude = TARGET_D / s;
+
+    let geo;
+    try {
+        geo = new TextGeometry(shaped, {
+            font,
+            size: 1,
+            depth: depthForExtrude,
+            curveSegments,
+            bevelEnabled: false,
+        });
+    } catch (e) {
+        console.error(e);
+        return null;
+    }
+    geo.scale(s, s, s);
+    geo.center();
+
+    const mat = new THREE.MeshStandardMaterial({
+        color: inkColor,
+        roughness: rough,
+        metalness: metal,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = 'scene-text-mesh';
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const group = new THREE.Group();
+    group.name = 'scene-text';
+    group.add(mesh);
+
+    const box = new THREE.Box3().setFromObject(group);
+    const lift = -box.min.y;
+    mesh.position.y += lift;
+
+    const box2 = new THREE.Box3().setFromObject(group);
+    const size = box2.getSize(new THREE.Vector3());
+    group.userData.modelPath = SCENE_TEXT_MODEL_PATH;
+    group.userData.sceneTextPayload = { text, colorKey };
+    group.userData.sceneTextScale = 1;
+    group.userData.originalDimensions = {
+        width: Math.round(size.x * 100),
+        depth: Math.round(size.z * 100),
+        height: Math.round(size.y * 100),
+    };
+
+    return group;
+}
+
+async function addSceneTextFromUI() {
+    if (typeof window !== 'undefined' && window.isGuestUser) {
+        document.getElementById('guestRestrictedModal').style.display = 'flex';
+        return;
+    }
+    if (!floor) {
+        alert('يرجى بدء التصميم وإنشاء المحل أولاً.');
+        return;
+    }
+    const input = document.getElementById('scene-text-input');
+    const colorRadio = document.querySelector('input[name="scene-text-color"]:checked');
+    const colorKey = (colorRadio && colorRadio.value) || 'black';
+    const raw = (input?.value || '').trim();
+    if (!raw) {
+        alert('يرجى كتابة نص قبل الإضافة.');
+        return;
+    }
+    const group = await createSceneTextGroup(raw, colorKey);
+    if (!group) return;
+    group.position.set(0, 0.92, 0);
+    autoAlignToNearestWall(group, true);
+    scene.add(group);
+    selectedObject = group;
+    selectedWall = null;
+    updateDeleteButtonState();
+    updateTransformButtonsState();
+    updateSelectionIndicator();
+    if (typeof updateFloatingToolbarPosition === 'function') {
+        updateFloatingToolbarPosition();
+    }
+}
+
+document.getElementById('scene-text-add-btn')?.addEventListener('click', async () => {
+    try {
+        if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    } catch (_) { /* ignore */ }
+    await addSceneTextFromUI();
+});
+
+document.querySelectorAll('input[name="scene-text-color"]').forEach((radio) => {
+    radio.addEventListener('change', () => {
+        if (selectedObject?.name !== 'scene-text' || !radio.checked) return;
+        const newKey = radio.value;
+        const prev = selectedObject.userData?.sceneTextPayload?.colorKey || 'black';
+        if (prev === newKey) return;
+        saveUndoState('sceneTextColor', { ref: selectedObject, previousColorKey: prev });
+        applySceneTextMaterialColor(selectedObject, newKey);
+    });
+});
+
 function getObjectWorldBoundingBox(object) { return new THREE.Box3().setFromObject(object); }
 function checkIntersection(a, b) {
     if (!a || !b) return false;
@@ -948,7 +1192,8 @@ function applyObjectSnappingAndPreventCollision(object) {
 }
 
 
-function autoAlignToNearestWall(object) {
+/** @param {boolean} [forceInitialRotation] لو true: يطبّق الدوران نحو أقرب حائط حتى لو كان العنصر بعيداً (وسط الغرفة)، لأن حد 1.2م كان يترك أول إنزال بدون دوران */
+function autoAlignToNearestWall(object, forceInitialRotation = false) {
     if (!autoRotationEnabled || !object || walls.length === 0) return;
     let minDistance = Infinity;
     let closestWall = null;
@@ -975,12 +1220,10 @@ function autoAlignToNearestWall(object) {
         if (dist < minDistance) { minDistance = dist; closestWall = wall; }
     });
 
-    if (closestWall && minDistance < activationDistance) {
+    if (closestWall && (forceInitialRotation || minDistance < activationDistance)) {
         const axis = closestWall.userData?.axis;
         const inwardNormal = closestWall.userData?.inwardNormal;
         if (inwardNormal && (Math.abs(inwardNormal.x) > 0.5 || Math.abs(inwardNormal.z) > 0.5)) {
-            // موديلات الكابينات في المشروع معرفة بعكس الافتراض السابق،
-            // لذلك نعكس الاتجاه هنا حتى يلتصق ظهر الكابينة بالحائط ووجهها يبقى نحو داخل الغرفة.
             if (Math.abs(inwardNormal.x) >= Math.abs(inwardNormal.z)) {
                 object.rotation.y = inwardNormal.x > 0 ? Math.PI / 2 : -Math.PI / 2;
             } else {
@@ -991,12 +1234,16 @@ function autoAlignToNearestWall(object) {
         } else if (axis === 'x') {
             object.rotation.y = closestWall.position.z > 0 ? Math.PI : 0;
         } else {
-            // احتياطي
             if (Math.abs(closestWall.position.x) > Math.abs(closestWall.position.z)) {
                 object.rotation.y = closestWall.position.x > 0 ? -Math.PI / 2 : Math.PI / 2;
             } else {
                 object.rotation.y = closestWall.position.z > 0 ? Math.PI : 0;
             }
+        }
+        // رسبشن (resption): الموديلات مصممة بمحور مختلف عن الفاترينات — +90° حتى يلاصق الظهر الحائط وليس الجانب
+        const alignPath = (object.userData?.modelPath || '').toString();
+        if (alignPath.includes('resption/')) {
+            object.rotation.y += Math.PI / 2;
         }
     }
 }
@@ -1151,11 +1398,26 @@ function createFloorAndWalls(roomLength, roomWidth) {
     ceiling = createCeilingMesh(length, width, wallHeight);
     scene.add(ceiling);
 
-    // --- 6. إنشاء الجدران ---
-    createWallMesh(length + wallDepth, wallHeight, wallDepth, new THREE.Vector3(0, 0, -width / 2 - halfWallDepth), 0);
-    createWallMesh(length + wallDepth, wallHeight, wallDepth, new THREE.Vector3(0, 0, width / 2 + halfWallDepth), 0);
-    createWallMesh(width + wallDepth, wallHeight, wallDepth, new THREE.Vector3(length / 2 + halfWallDepth, 0, 0), Math.PI / 2);
-    createWallMesh(width + wallDepth, wallHeight, wallDepth, new THREE.Vector3(-length / 2 - halfWallDepth, 0, 0), Math.PI / 2);
+    // --- 6. إنشاء الجدران (محل: عمق = جداران متقابلان، عرض = جدار خلفي واحد، واجهة مفتوحة) ---
+    // roomLength → length (محور X)، roomWidth → width (محور Z). الرسم المخصص لا يتأثر.
+    // inwardNormal: اتجاه نحو داخل الغرفة (للتوافق مع الغرفة المضلعة ودوران الرسبشن/الفاترينات)
+    if (length >= width) {
+        // طول المحل ≥ عرضه: جداران على ±Z (كل واحد طوله length = العمق)، جدار خلف واحد على −X، فتحة نحو +X
+        createWallMesh(length + wallDepth, wallHeight, wallDepth, new THREE.Vector3(0, 0, -width / 2 - halfWallDepth), 0);
+        walls[walls.length - 1].userData.inwardNormal = { x: 0, z: 1 };
+        createWallMesh(length + wallDepth, wallHeight, wallDepth, new THREE.Vector3(0, 0, width / 2 + halfWallDepth), 0);
+        walls[walls.length - 1].userData.inwardNormal = { x: 0, z: -1 };
+        createWallMesh(width + wallDepth, wallHeight, wallDepth, new THREE.Vector3(-length / 2 - halfWallDepth, 0, 0), Math.PI / 2);
+        walls[walls.length - 1].userData.inwardNormal = { x: 1, z: 0 };
+    } else {
+        // العرض أكبر من الطول: جداران على ±X (طول كل منهما width)، جدار خلف على −Z، فتحة نحو +Z
+        createWallMesh(width + wallDepth, wallHeight, wallDepth, new THREE.Vector3(length / 2 + halfWallDepth, 0, 0), Math.PI / 2);
+        walls[walls.length - 1].userData.inwardNormal = { x: -1, z: 0 };
+        createWallMesh(width + wallDepth, wallHeight, wallDepth, new THREE.Vector3(-length / 2 - halfWallDepth, 0, 0), Math.PI / 2);
+        walls[walls.length - 1].userData.inwardNormal = { x: 1, z: 0 };
+        createWallMesh(length + wallDepth, wallHeight, wallDepth, new THREE.Vector3(0, 0, -width / 2 - halfWallDepth), 0);
+        walls[walls.length - 1].userData.inwardNormal = { x: 0, z: 1 };
+    }
 
     if (currentWallTexturePath) {
         changeWallTexture(currentWallTexturePath);
@@ -1196,7 +1458,7 @@ function addCabinetToScene(modelPath, isDoubleAttached = false, customY = null) 
             applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture);
         }
 
-        autoAlignToNearestWall(group);
+        autoAlignToNearestWall(group, true);
         scene.add(group);
 
         selectedObject = group;
@@ -1227,12 +1489,16 @@ if (queryParams) {
                         node.receiveShadow = true;
                     }
                 });
+            const isAttached = modelPath.includes('resption/');
+            // موديلات الرسبشن: قلب الـ mesh 180° حول Y قبل التوسيط ثم نفس autoAlign للفاترينات (علم للحفظ/التحميل)
+            if (isAttached) {
+                newModel.rotation.y = Math.PI;
+            }
             const box = new THREE.Box3().setFromObject(newModel);
             const center = box.getCenter(new THREE.Vector3());
             const group = new THREE.Group();
             group.add(newModel);
             newModel.position.set(-center.x, -box.min.y, -center.z);
-            const isAttached = modelPath.includes('resption/');
             const isPantry = modelPath.includes('larder/');
             const isAppliance = modelPath.includes('appliances/');
             
@@ -1242,8 +1508,9 @@ if (queryParams) {
                 cabinetY = customY;
             } else if (isDoubleAttached) { 
                 cabinetY = 2.22; 
-            } else if (isAttached) { 
-                cabinetY = 1.5; 
+            } else if (isAttached) {
+                // رسبشن (resption/): على الأرض مثل الفاترينات الأرضية، لا على ارتفاع 1.5م
+                cabinetY = 0;
             } else if (isPantry) { 
                 cabinetY = 0; 
             } else {
@@ -1264,10 +1531,13 @@ if (queryParams) {
             const size = box.getSize(new THREE.Vector3());
             group.userData.originalDimensions = { width: Math.round(size.x * 100), depth: Math.round(size.z * 100), height: Math.round(size.y * 100) };
             group.userData.modelPath = modelPath;
+            if (isAttached) {
+                group.userData.receptionMeshYawPI = true;
+            }
             if (isDoubleAttached && currentDoubleAttachedCabinetTexture) { applyTextureToMaterial(group, 'up', currentDoubleAttachedCabinetTexture); }
-            else if (isAttached && currentAttachedCabinetTexture) { applyTextureToMaterial(group, 'up', currentAttachedCabinetTexture); }
+            else if (isAttached && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
             else if ((group.name === 'floor-cabinet' || group.name === 'pantry-cabinet') && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
-            autoAlignToNearestWall(group);
+            autoAlignToNearestWall(group, true);
             
             scene.add(group);
 
@@ -1384,12 +1654,16 @@ function handlePressDown(clientX, clientY) {
         } else {
             // --- حالة اختيار كابينة أو عنصر آخر ---
             
-            // منطق النقر المزدوج (Double Click) لفتح نافذة الأبعاد
-            if (selectedObject === obj && isCabinet(obj)) {
+            // منطق النقر المزدوج (Double Click) — كابينة: أبعاد | نص مشهد: حجم
+            if (selectedObject === obj && (isCabinet(obj) || obj.name === 'scene-text')) {
                 if (doubleClickTimeout) {
                     clearTimeout(doubleClickTimeout);
                     doubleClickTimeout = null;
-                    showDimensionsPopup(obj);
+                    if (obj.name === 'scene-text') {
+                        showSceneTextScalePopup(obj);
+                    } else {
+                        showDimensionsPopup(obj);
+                    }
                     return;
                 } else {
                     doubleClickTimeout = setTimeout(() => {
@@ -1428,8 +1702,8 @@ function handlePressDown(clientX, clientY) {
 
             // >>> تعديل: إظهار الشريط العائم وتحديثه <<<
             if (typeof floatingToolbar !== 'undefined' && floatingToolbar) {
-                // نظهر الشريط فقط للكابينات والأسطح
-                if (isCabinet(obj) || obj.name === 'countertop') {
+                // نظهر الشريط للكابينات والنصوص والأسطح
+                if (isSceneLayoutObject(obj) || obj.name === 'countertop') {
                     floatingToolbar.style.display = 'flex'; 
                     floatingToolbar.classList.remove('expanded'); // يبدأ الزر وهو مغلق (أيقونة فقط)
                     if (ftMainToggleBtn) ftMainToggleBtn.querySelector('i').className = 'fas fa-tools';
@@ -1611,6 +1885,7 @@ function updateSelectionIndicator() {
     if (selectionIndicator) {
         selectionIndicator.style.display = 'none';
     }
+    syncAddTextPanelFromSelection();
 }
 
 // دالة مساعدة لمعرفة هل الجهاز موبايل أم كمبيوتر
@@ -1757,7 +2032,7 @@ window.addEventListener('keydown', (e) => {
     // التحقق من Ctrl+Z (أو Cmd+Z على Mac)
     if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault(); // منع السلوك الافتراضي للمتصفح
-        performUndo();
+        void performUndo();
     }
 });
 
@@ -1768,7 +2043,14 @@ canvas.addEventListener('mouseup', handlePressUp);
 canvas.addEventListener('touchstart', (e) => { if (e.touches.length === 1) handlePressDown(e.touches[0].clientX, e.touches[0].clientY); });
 canvas.addEventListener('touchmove', (e) => { if (e.touches.length === 1) handleMove(e.touches[0].clientX, e.touches[0].clientY); });
 canvas.addEventListener('touchend', handlePressUp);
-canvas.addEventListener('dblclick', (e) => { if (selectedObject && isCabinet(selectedObject)) { showDimensionsPopup(selectedObject); } });
+canvas.addEventListener('dblclick', () => {
+    if (!selectedObject) return;
+    if (selectedObject.name === 'scene-text') {
+        showSceneTextScalePopup(selectedObject);
+        return;
+    }
+    if (isCabinet(selectedObject)) showDimensionsPopup(selectedObject);
+});
 
 // --- Drag & Drop ---
 if (!('ontouchstart' in window)) {
@@ -1826,6 +2108,9 @@ if (queryParams) {
                 const intersects = raycaster.intersectObjects([floor], true);
                 const group = new THREE.Group();
                 group.add(newModel);
+                if (cabinetType === 'attached-cabinet') {
+                    newModel.rotation.y = Math.PI;
+                }
                 const box = new THREE.Box3().setFromObject(newModel);
                 const center = box.getCenter(new THREE.Vector3());
                 newModel.position.set(-center.x, -box.min.y, -center.z);
@@ -1833,8 +2118,8 @@ if (queryParams) {
                 // إضافة شرط الـ customY هنا أيضاً
                 if (droppedData.customY !== null && droppedData.customY !== undefined) {
                     cabinetY = droppedData.customY;
-                } else if (cabinetType === 'attached-cabinet') { 
-                    cabinetY = 1.5;
+                } else if (cabinetType === 'attached-cabinet') {
+                    cabinetY = 0;
                 } else if (cabinetType === 'double-attached-cabinet') { 
                     cabinetY = 2.22; 
                 } else if (cabinetType === 'floor-cabinet') {
@@ -1859,10 +2144,14 @@ if (queryParams) {
                 const size = box.getSize(new THREE.Vector3());
                 group.userData.originalDimensions = { width: Math.round(size.x * 100), depth: Math.round(size.z * 100), height: Math.round(size.y * 100) };
                 group.userData.modelPath = droppedModelPath;
+                if (cabinetType === 'attached-cabinet') {
+                    group.userData.receptionMeshYawPI = true;
+                }
                 if (group.name === 'double-attached-cabinet' && currentDoubleAttachedCabinetTexture) { applyTextureToMaterial(group, 'up', currentDoubleAttachedCabinetTexture); }
+                else if (group.name === 'attached-cabinet' && droppedModelPath.includes('resption/') && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
                 else if (group.name === 'attached-cabinet' && currentAttachedCabinetTexture) { applyTextureToMaterial(group, 'up', currentAttachedCabinetTexture); }
                 else if ((group.name === 'floor-cabinet' || group.name === 'pantry-cabinet') && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
-                autoAlignToNearestWall(group);
+                autoAlignToNearestWall(group, true);
                 scene.add(group);
                 selectedObject = group; selectedWall = null;
                 updateDeleteButtonState(); updateTransformButtonsState(); updateSelectionIndicator();
@@ -1897,6 +2186,7 @@ startDesignBtn.addEventListener('click', () => {
         createFloorAndWalls(currentRoomLength, currentRoomWidth);
         warmUpModelPipeline();
         populateModelList('vatrenaCabinetsList', vatrenaCabinets);
+        populateModelList('middleVatrenaCabinetsList', middleVatrenaCabinets);
         populateModelList('receptionCabinetsList', receptionCabinets);
         populateModelList('electricalAppliancesList', electricalAppliances);
         populateModelList('accessoriesList', accessoriesList);
@@ -2622,6 +2912,7 @@ function startCustomDesign() {
         createCustomFloorAndWalls(centeredPoints);
         warmUpModelPipeline();
         populateModelList('vatrenaCabinetsList',         vatrenaCabinets);
+        populateModelList('middleVatrenaCabinetsList',   middleVatrenaCabinets);
         populateModelList('receptionCabinetsList',      receptionCabinets);
         populateModelList('electricalAppliancesList', electricalAppliances);
         populateModelList('accessoriesList',           accessoriesList);
@@ -2806,6 +3097,13 @@ function saveUndoState(actionType, object) {
             break;
         }
 
+        case 'sceneTextColor':
+            state.object = {
+                ref: object.ref,
+                previousColorKey: object.previousColorKey || 'black',
+            };
+            break;
+
         // حالة تغيير لون مجموعة كاملة (من القائمة الجانبية)
         case 'groupColor': {
             const groupState = [];
@@ -2841,14 +3139,14 @@ function saveUndoState(actionType, object) {
     updateUndoButtonState();
 }
 
-function performUndo() {
+async function performUndo() {
     if (undoStack.length === 0) return;
     
     const lastAction = undoStack.pop();
     
     switch(lastAction.type) {
         case 'delete':
-            restoreDeletedObject(lastAction.object);
+            await restoreDeletedObject(lastAction.object);
             break;
             
         case 'move':
@@ -2895,6 +3193,13 @@ function performUndo() {
             }
             break;
 
+        case 'sceneTextColor':
+            if (lastAction.object.ref && lastAction.object.ref.parent) {
+                applySceneTextMaterialColor(lastAction.object.ref, lastAction.object.previousColorKey);
+                if (selectedObject === lastAction.object.ref) syncAddTextPanelFromSelection();
+            }
+            break;
+
         // التراجع عن لون مجموعة كابينات
         case 'groupColor':
             if (Array.isArray(lastAction.object)) {
@@ -2925,8 +3230,24 @@ function performUndo() {
     updateUndoButtonState();
 }
 
-function restoreDeletedObject(objectData) {
+async function restoreDeletedObject(objectData) {
     if (!objectData || !objectData.modelPath) return;
+
+    if (objectData.modelPath === SCENE_TEXT_MODEL_PATH && objectData.userData?.sceneTextPayload) {
+        const pl = objectData.userData.sceneTextPayload;
+        const group = await createSceneTextGroup(pl.text, pl.colorKey);
+        if (!group) return;
+        group.position.copy(objectData.position);
+        group.rotation.copy(objectData.rotation);
+        group.scale.copy(objectData.scale);
+        scene.add(group);
+        selectedObject = group;
+        selectedWall = null;
+        updateDeleteButtonState();
+        updateTransformButtonsState();
+        updateSelectionIndicator();
+        return;
+    }
     
     // إذا كان الكائن Procedural Slat
     if (objectData.modelPath === 'PROCEDURAL_SLAT') {
@@ -2970,14 +3291,20 @@ if (queryParams) secureModelUrl += '&' + queryParams;
                     node.receiveShadow = true;
                 }
             });
-            
+            const pathRestore = (objectData.userData?.modelPath || objectData.modelPath || '').toString();
+            const flipReceptionMeshRestore = objectData.name === 'attached-cabinet' &&
+                objectData.userData?.receptionMeshYawPI !== false &&
+                (objectData.userData?.receptionMeshYawPI === true || pathRestore.includes('resption/'));
+            if (flipReceptionMeshRestore) {
+                newModel.rotation.y = Math.PI;
+            }
             const box = new THREE.Box3().setFromObject(newModel);
             const center = box.getCenter(new THREE.Vector3());
             const group = new THREE.Group();
             group.add(newModel);
             newModel.position.set(-center.x, -box.min.y, -center.z);
             
-            // استرجاع كل الخصائص
+            // استرجاع كل الخصائص (دوران المجموعة المحفوظ يطابق المشهد؛ دوران الطفل π للرسبشن يُعاد هنا فقط)
             group.position.copy(objectData.position);
             group.rotation.copy(objectData.rotation);
             group.scale.copy(objectData.scale);
@@ -2991,6 +3318,8 @@ if (queryParams) secureModelUrl += '&' + queryParams;
             
             if (isDoubleAttached && currentDoubleAttachedCabinetTexture) {
                 applyTextureToMaterial(group, 'up', currentDoubleAttachedCabinetTexture);
+            } else if (isAttached && currentFloorCabinetTexture && isReceptionCabinetGroup(group)) {
+                applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture);
             } else if (isAttached && currentAttachedCabinetTexture) {
                 applyTextureToMaterial(group, 'up', currentAttachedCabinetTexture);
             } else if (isFloor && currentFloorCabinetTexture) {
@@ -3032,7 +3361,7 @@ function updateUndoButtonState() {
 
 // 0. زر التراجع (Undo)
 ftUndoBtn?.addEventListener('click', () => {
-    performUndo();
+    void performUndo();
 });
 
 // --- حدث النقر لزر الحذف في القائمة الجانبية ---
@@ -3099,14 +3428,14 @@ document.querySelectorAll('.ft-menu-item').forEach(item => {
         saveUndoState('color', selectedObject);
         const group = e.target.dataset.group;
         const originalName = selectedObject.name;
-        const targetMat = (originalName.includes('attached') || originalName === 'double-attached-cabinet') ? 'up' : 'ground';
+        const targetMat = cabinetBodyMaterialSlot(selectedObject);
         
         if (group === 'reset') {
             // إرجاع العنصر لحالته الأصلية
             selectedObject.userData.customColorGroup = null;
             let texName = null;
             if (originalName === 'floor-cabinet' || originalName === 'pantry-cabinet') texName = currentFloorCabinetTexture;
-            else if (originalName === 'attached-cabinet') texName = currentAttachedCabinetTexture;
+            else if (originalName === 'attached-cabinet') texName = isReceptionCabinetGroup(selectedObject) ? currentFloorCabinetTexture : currentAttachedCabinetTexture;
             else if (originalName === 'double-attached-cabinet') texName = currentDoubleAttachedCabinetTexture;
             
             if (texName) applyCabinetTexture(selectedObject, targetMat, texName);
@@ -3116,9 +3445,13 @@ document.querySelectorAll('.ft-menu-item').forEach(item => {
             selectedObject.userData.customColorGroup = group;
             
             if (group === 'floor' && currentFloorCabinetTexture) {
-                applyCabinetTexture(selectedObject, targetMat, currentFloorCabinetTexture);
-            } else if (group === 'attached' && currentAttachedCabinetTexture) {
-                applyCabinetTexture(selectedObject, targetMat, currentAttachedCabinetTexture);
+                applyCabinetTexture(selectedObject, cabinetBodyMaterialSlot(selectedObject), currentFloorCabinetTexture);
+            } else if (group === 'attached') {
+                if (isReceptionCabinetGroup(selectedObject)) {
+                    if (currentFloorCabinetTexture) applyCabinetTexture(selectedObject, 'ground', currentFloorCabinetTexture);
+                } else if (currentAttachedCabinetTexture) {
+                    applyCabinetTexture(selectedObject, targetMat, currentAttachedCabinetTexture);
+                }
             } else if (group === 'double' && currentDoubleAttachedCabinetTexture) {
                 applyCabinetTexture(selectedObject, targetMat, currentDoubleAttachedCabinetTexture);
           } else if (group === 'room-floor' && currentFloorTexturePath) {
@@ -3173,7 +3506,7 @@ ftDuplicateBtn?.addEventListener('click', () => {
     cloneGroup.updateMatrixWorld();
 
     // توجيه العنصر نحو أقرب حائط (الدالة المسؤولة عن دوران العناصر الجديدة)
-    autoAlignToNearestWall(cloneGroup);
+    autoAlignToNearestWall(cloneGroup, true);
 
     // 5. إضافة العنصر الجديد للمشهد
     scene.add(cloneGroup);
@@ -3230,6 +3563,44 @@ function hideDimensionsPopup() {
     dimensionsPopup.style.display = 'none';
     cabinetBeingEdited = null;
 }
+
+function showSceneTextScalePopup(group) {
+    if (!group || group.name !== 'scene-text' || !sceneTextScalePopup || !sceneTextScaleInput) return;
+    sceneTextScaleEditing = group;
+    const pct = Math.round((group.scale?.x || 1) * 100);
+    sceneTextScaleInput.value = String(THREE.MathUtils.clamp(pct, 15, 400));
+    sceneTextScalePopup.style.display = 'block';
+    sceneTextScaleInput.focus();
+}
+
+function hideSceneTextScalePopup() {
+    if (sceneTextScalePopup) sceneTextScalePopup.style.display = 'none';
+    sceneTextScaleEditing = null;
+}
+
+function applySceneTextScale() {
+    if (!sceneTextScaleEditing || !sceneTextScaleInput) return;
+    let pct = parseFloat(sceneTextScaleInput.value);
+    if (isNaN(pct)) pct = 100;
+    pct = THREE.MathUtils.clamp(pct, 15, 400);
+    sceneTextScaleEditing.userData.previousScale = sceneTextScaleEditing.scale.clone();
+    saveUndoState('scale', sceneTextScaleEditing);
+    const s = pct / 100;
+    sceneTextScaleEditing.scale.setScalar(s);
+    sceneTextScaleEditing.userData.sceneTextScale = s;
+    sceneTextScaleEditing.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(sceneTextScaleEditing);
+    const sz = box.getSize(new THREE.Vector3());
+    sceneTextScaleEditing.userData.originalDimensions = {
+        width: Math.round(sz.x * 100),
+        depth: Math.round(sz.z * 100),
+        height: Math.round(sz.y * 100),
+    };
+    hideSceneTextScalePopup();
+}
+
+applySceneTextScaleBtn?.addEventListener('click', applySceneTextScale);
+cancelSceneTextScaleBtn?.addEventListener('click', hideSceneTextScalePopup);
 
 // دالة مساعدة لإسقاط خامة على شكل قطعة واحدة متصلة بدون تقطيع أو تمطط
 function applyPlanarUVs(geometry) {
@@ -3995,6 +4366,7 @@ document.querySelectorAll('.collapsible-content').forEach((el) => {
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         if (dimensionsPopup.style.display === 'block') hideDimensionsPopup();
+        if (sceneTextScalePopup?.style.display === 'block') hideSceneTextScalePopup();
         if (roomDimensionsPopup.style.display === 'block') hideRoomDimensionsPopup();
     }
 });
@@ -4110,7 +4482,7 @@ function serializeScene() {
         wallsData: []
     };
     scene.children.forEach(obj => {
-        if (obj.isGroup && (isCabinet(obj) || obj.name === 'countertop' || obj.name === 'baseboard')) {
+        if (obj.isGroup && (isCabinet(obj) || obj.name === 'countertop' || obj.name === 'baseboard' || obj.name === 'scene-text')) {
             sceneData.objects.push({
                 name: obj.name,
                 position: obj.position.clone(),
@@ -4127,7 +4499,10 @@ function serializeScene() {
                     autoW: obj.userData.autoW,             // حفظ عرض المرمر التلقائي
                     autoD: obj.userData.autoD,   
                     baseboardType: obj.userData.baseboardType,          // حفظ عمق المرمر التلقائي
-                    customColorGroup: obj.userData.customColorGroup // حفظ اللون المخصص
+                    customColorGroup: obj.userData.customColorGroup, // حفظ اللون المخصص
+                    receptionMeshYawPI: obj.userData.receptionMeshYawPI === true ? true : undefined,
+                    sceneTextPayload: obj.userData.sceneTextPayload ? { ...obj.userData.sceneTextPayload } : undefined,
+                    sceneTextScale: obj.name === 'scene-text' ? (obj.scale?.x ?? 1) : undefined
                 }
             });
         }
@@ -4144,7 +4519,7 @@ function serializeScene() {
 function clearScene() {
     const toRemove = [];
     scene.children.forEach(child => {
-        if (child.isGroup && (isCabinet(child) || child.name === 'countertop' || child.name === 'baseboard')) {
+        if (child.isGroup && (isCabinet(child) || child.name === 'countertop' || child.name === 'baseboard' || child.name === 'scene-text')) {
             toRemove.push(child);
         }
     });
@@ -4321,7 +4696,7 @@ function rebuildAutoBaseboard(path, w, d) {
     return bbGroup;
 }
 
-function deserializeScene(jsonString) {
+async function deserializeScene(jsonString) {
     try {
         const data = JSON.parse(jsonString);
         clearScene();
@@ -4367,7 +4742,7 @@ function deserializeScene(jsonString) {
         if (data.textures.doubleAttached) changeAllDoubleAttachedCabinetsTexture(data.textures.doubleAttached);
         if (data.textures.countertop) changeAllCountertopsTexture(data.textures.countertop);
         warmUpModelPipeline();
-       data.objects.forEach(obj => {
+        for (const obj of data.objects) {
             // 1. معالجة الستربات البرمجية (PROCEDURAL_SLAT)
             if (obj.userData.modelPath === 'PROCEDURAL_SLAT') {
                 const dims = obj.userData.originalDimensions;
@@ -4396,6 +4771,18 @@ function deserializeScene(jsonString) {
                     applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture);
                 }
                 scene.add(group);
+            } else if (obj.userData?.modelPath === SCENE_TEXT_MODEL_PATH && obj.userData.sceneTextPayload) {
+                const pl = obj.userData.sceneTextPayload;
+                const group = await createSceneTextGroup(pl.text, pl.colorKey);
+                if (group) {
+                    group.position.copy(obj.position);
+                    group.rotation.copy(obj.rotation);
+                    group.scale.copy(obj.scale);
+                    group.userData = { ...obj.userData, modelPath: SCENE_TEXT_MODEL_PATH, sceneTextPayload: { ...pl } };
+                    group.userData.sceneTextScale = obj.scale?.x ?? obj.userData?.sceneTextScale ?? 1;
+                    scene.add(group);
+                    applyHandlesVisibility(group);
+                }
 // 2. معالجة الكابينات العادية
             } else if (obj.userData.modelPath) {
                // التعديل الآمن لتحميل الموديلات المحفوظة
@@ -4407,28 +4794,41 @@ if (queryParams) secureModelUrl += '&' + queryParams;
                     const group = new THREE.Group();
                     group.add(newModel);
                     group.name = obj.name;
+                    const pathDeser = (obj.userData?.modelPath || '').toString();
+                    const flipReceptionMeshDeser = obj.name === 'attached-cabinet' &&
+                        obj.userData?.receptionMeshYawPI !== false &&
+                        (obj.userData?.receptionMeshYawPI === true || pathDeser.includes('resption/'));
+                    if (flipReceptionMeshDeser) {
+                        newModel.rotation.y = Math.PI;
+                    }
+                    const box = new THREE.Box3().setFromObject(newModel);
+                    const center = box.getCenter(new THREE.Vector3());
+                    newModel.position.set(-center.x, -box.min.y, -center.z);
                     group.position.copy(obj.position);
                     group.rotation.copy(obj.rotation);
                     group.scale.copy(obj.scale);
                     group.userData = { ...obj.userData, modelPath: obj.userData.modelPath };
-                    
-                    const box = new THREE.Box3().setFromObject(newModel);
-                    const center = box.getCenter(new THREE.Vector3());
-                    newModel.position.set(-center.x, -box.min.y, -center.z);
 
                     // تطبيق الألوان المخصصة للكابينات العادية
                     const customGrp = group.userData.customColorGroup;
-                    const targetMat = (group.name.includes('attached') || group.name === 'double-attached-cabinet') ? 'up' : 'ground';
+                    const bodyMat = cabinetBodyMaterialSlot(group);
 
                     if (customGrp) {
-                        if (customGrp === 'floor' && currentFloorCabinetTexture) applyCabinetTexture(group, targetMat, currentFloorCabinetTexture);
-                        else if (customGrp === 'attached' && currentAttachedCabinetTexture) applyCabinetTexture(group, targetMat, currentAttachedCabinetTexture);
-                        else if (customGrp === 'double' && currentDoubleAttachedCabinetTexture) applyCabinetTexture(group, targetMat, currentDoubleAttachedCabinetTexture);
+                        if (customGrp === 'floor' && currentFloorCabinetTexture) applyCabinetTexture(group, bodyMat, currentFloorCabinetTexture);
+                        else if (customGrp === 'attached') {
+                            if (isReceptionCabinetGroup(group) && currentFloorCabinetTexture) {
+                                applyCabinetTexture(group, 'ground', currentFloorCabinetTexture);
+                            } else if (!isReceptionCabinetGroup(group) && currentAttachedCabinetTexture) {
+                                applyCabinetTexture(group, bodyMat, currentAttachedCabinetTexture);
+                            }
+                        }
+                        else if (customGrp === 'double' && currentDoubleAttachedCabinetTexture) applyCabinetTexture(group, bodyMat, currentDoubleAttachedCabinetTexture);
                         else if (customGrp === 'room-floor' && currentFloorTexturePath) applyPathToCabinetMaterial(group, currentFloorTexturePath, 'room-floor');
                         else if (customGrp === 'room-wall' && currentWallTexturePath) applyPathToCabinetMaterial(group, currentWallTexturePath, 'room-wall');
                     } else {
                         // اللون الافتراضي
                         if (group.name === 'double-attached-cabinet' && currentDoubleAttachedCabinetTexture) { applyTextureToMaterial(group, 'up', currentDoubleAttachedCabinetTexture); }
+                        else if (isReceptionCabinetGroup(group) && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
                         else if (group.name === 'attached-cabinet' && currentAttachedCabinetTexture) { applyTextureToMaterial(group, 'up', currentAttachedCabinetTexture); }
                         else if ((group.name === 'floor-cabinet' || group.name === 'pantry-cabinet') && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
                     }
@@ -4463,7 +4863,7 @@ if (queryParams) secureModelUrl += '&' + queryParams;
                     }
                 }
             }
-        }); // نهاية forEach
+        } // نهاية objects
 
             
         
@@ -4551,8 +4951,8 @@ async function loadSpecificDesign(designId) {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const responseText = await response.text();
         let designData;
-        try { designData = JSON.parse(responseText); } catch (e) { deserializeScene(responseText); loadingOverlay.style.display = 'none'; return; }
-        if (designData && designData.success === false) { throw new Error(designData.message); } else { deserializeScene(responseText); }
+        try { designData = JSON.parse(responseText); } catch (e) { await deserializeScene(responseText); loadingOverlay.style.display = 'none'; return; }
+        if (designData && designData.success === false) { throw new Error(designData.message); } else { await deserializeScene(responseText); }
     } catch (error) {
         console.error('Error loading specific design:', error); alert('فشل تحميل التصميم: ' + error.message);
     } finally { loadingOverlay.style.display = 'none'; }

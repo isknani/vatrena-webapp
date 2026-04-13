@@ -45,14 +45,58 @@ vatrenaCabinets.push({ name: '100', path: 'vatrena/v11d.glb', thumbnail: 'thumbn
 
 vatrenaCabinets.push({ name: 'ستربات', path: 'PROCEDURAL_SLAT', thumbnail: 'thumbnails_vatrena/mdf.webp' });
 
+/** فاترينات وسط المحل — عدّل `name` لكل سطر كما تريد يظهر في القائمة؛ `file` بدون .glb (يجب أن يطابق اسم الملف والصورة المصغرة) */
+const MIDDLE_VATRENA_DIR = 'middle vatrena';
+const MIDDLE_VATRENA_THUMB = 'thumbnails_vatrena';
+const middleVatrenaSpecs = [
+    { name: '200', file: 'mv1' },
+    { name: '200', file: 'mv2' },
+    { name: '100', file: 'mv3' },
+    { name: '100', file: 'mv4' },
+    { name: '100', file: 'mv5' },
+    { name: '100', file: 'mv6' },
+    { name: '100', file: 'mv7d' },
+    { name: '100', file: 'mv8' },
+    { name: '100', file: 'mv9' },
+    { name: '100', file: 'mv10' },
+    { name: '100', file: 'mv11' },
+    { name: '100', file: 'mv12' },
+];
+export const middleVatrenaCabinets = middleVatrenaSpecs.map(({ name, file }) => ({
+    name,
+    path: `${MIDDLE_VATRENA_DIR}/${file}.glb`,
+    thumbnail: `${MIDDLE_VATRENA_THUMB}/${file}.webp`,
+}));
+middleVatrenaCabinets.push({ name: 'ستربات', path: 'PROCEDURAL_SLAT', thumbnail: 'thumbnails_vatrena/mdf.webp' });
 
 
 
 
-
-/** قائمة موديلات قسم الرسبشن (Reception) */
-export const receptionCabinets = [];
-receptionCabinets.push({ name: '60*60', path: 'resption/ml60.glb', thumbnail: 'thumbnails_vatrena/ml60.webp' });
+/** رسبشن — عدّل `name` لكل سطر؛ `file` بدون .glb (ملفات في static/resption/، صور thumbnails_vatrena/resN.webp) */
+const RECEPTION_DIR = 'resption';
+const RECEPTION_THUMB = 'thumbnails_vatrena';
+const receptionSpecs = [
+    { name: 'رسبشن', file: 'res1' },
+    { name: 'رسبشن', file: 'res2' },
+    { name: 'رسبشن', file: 'res3' },
+    { name: 'رسبشن', file: 'res4' },
+    { name: 'رسبشن', file: 'res5' },
+    { name: 'رسبشن', file: 'res6' },
+    { name: 'رسبشن', file: 'res7' },
+    { name: 'رسبشن', file: 'res8' },
+    { name: 'رسبشن', file: 'res9' },
+    { name: 'رسبشن', file: 'res10' },
+    { name: 'رسبشن', file: 'res11' },
+    { name: 'رسبشن', file: 'res12' },
+    { name: 'رسبشن', file: 'res13' },
+    { name: 'رسبشن', file: 'res14' },
+    { name: 'رسبشن', file: 'res15' },
+];
+export const receptionCabinets = receptionSpecs.map(({ name, file }) => ({
+    name,
+    path: `${RECEPTION_DIR}/${file}.glb`,
+    thumbnail: `${RECEPTION_THUMB}/${file}.webp`,
+}));
 
 
 

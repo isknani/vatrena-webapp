@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>تصميم مطبخ ثلاثي الأبعاد</title>
+    <title>تصميم فاترينات المحلات   </title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-    <link rel="stylesheet" href="style.css?v=150" />
+    <link rel="stylesheet" href="style.css?v=159" />
     <link rel="preload" href="./draco_vatrena/draco_decoder.wasm" as="fetch" crossorigin />
     <link rel="preload" href="./get_model.php?file=vatrena%2Fv1.glb" as="fetch" crossorigin />
 </head>
@@ -17,14 +17,14 @@
     </div>
 
     <div id="setup-panel">
-        <h1>تصميم مطبخ ثلاثي الأبعاد</h1>
-        <p>أدخل أبعاد ألمطبخ لبدء التصميم.</p>
+        <h1>تصميم فاترينات المحلات  </h1>
+        <p>أدخل أبعاد المحل لبدء التصميم.</p>
         <div class="dimensions-group">
-            <label for="roomLength">طول ألمطبخ (سم):</label>
+            <label for="roomLength">عمق المحل (سم):</label>
     <input type="number" id="roomLength" value="400" min="100" />
-    <label for="roomWidth">عرض ألمطبخ (سم):</label>
+    <label for="roomWidth">عرض المحل (سم):</label>
     <input type="number" id="roomWidth" value="300" min="100" />
-    <label for="roomHeight">ارتفاع ألمطبخ (سم):</label>
+    <label for="roomHeight">ارتفاع المحل (سم):</label>
     <input type="number" id="roomHeight" value="280" min="200" />
         </div>
 
@@ -41,7 +41,7 @@
 <div id="videoModal" class="report-modal" style="display: none; z-index: 10001;">
     <div class="report-content" style="max-width: 800px; width: 90%;">
         <div class="report-header">
-            <h3>🎥 شرح استخدام قسم تصميم ألمطابخ</h3>
+            <h3>🎥 شرح استخدام قسم الفاترينات </h3>
             <span class="close-video" style="cursor:pointer; font-size: 30px;">&times;</span>
         </div>
         <div class="video-body" style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden;">
@@ -139,13 +139,23 @@
     </div>
 </div>
 
-
-
+<div id="scene-text-scale-popup" style="display: none;">
+    <h3>حجم النص</h3>
+    <div class="dimension-input-group">
+        <label for="scene-text-scale-input">الحجم (%):</label>
+        <input type="number" id="scene-text-scale-input" min="15" max="400" value="100" step="5" />
+    </div>
+    <p class="move-hint">100% الحجم الأصلي — زد أو نقص النسبة ثم اضغط تطبيق</p>
+    <div class="popup-buttons">
+        <button type="button" id="apply-scene-text-scale">تطبيق</button>
+        <button type="button" id="cancel-scene-text-scale">إلغاء</button>
+    </div>
+</div>
 
        <div id="room-dimensions-popup">
-    <h3>تعديل أبعاد الغرفة</h3>
+    <h3>تعديل أبعاد المحل</h3>
     <div class="dimension-input-group">
-        <label>الطول:</label>
+        <label>العمق:</label>
         <input type="number" id="new-room-length" min="100" step="10" />
         <span>سم</span>
     </div>
@@ -178,6 +188,13 @@
                 </div>
 
                 <div class="section">
+                    <div class="collapsible-header">فاترينات وسطيه</div>
+                    <div class="collapsible-content">
+                        <ul id="middleVatrenaCabinetsList" class="model-list"></ul>
+                    </div>
+                </div>
+
+                <div class="section">
                     <div class="collapsible-header">رسبشن </div>
                     <div class="collapsible-content">
                         <ul id="receptionCabinetsList" class="model-list"></ul>
@@ -198,7 +215,32 @@
     </div>
 </div>
 
-
+                <div class="section">
+                    <div class="collapsible-header">إضافة نص</div>
+                    <div class="collapsible-content">
+                        <div class="add-text-panel">
+                            <label class="add-text-label" for="scene-text-input">النص</label>
+                            <input type="text" id="scene-text-input" class="add-text-input" maxlength="40" placeholder="اكتب النص..." dir="auto" autocomplete="off" />
+                            <span class="add-text-hint">حتى 40 حرفاً</span>
+                            <div class="add-text-colors-title">لون النص</div>
+                            <div class="scene-text-color-choices" role="radiogroup" aria-label="لون النص">
+                                <label class="scene-text-swatch" title="أسود">
+                                    <input type="radio" name="scene-text-color" value="black" checked />
+                                    <span class="scene-text-swatch-box scene-text-swatch-black"></span>
+                                </label>
+                                <label class="scene-text-swatch" title="أصفر مائل للذهبي">
+                                    <input type="radio" name="scene-text-color" value="gold" />
+                                    <span class="scene-text-swatch-box scene-text-swatch-gold"></span>
+                                </label>
+                                <label class="scene-text-swatch" title="رصاصي مائل للستيل">
+                                    <input type="radio" name="scene-text-color" value="steel" />
+                                    <span class="scene-text-swatch-box scene-text-swatch-steel"></span>
+                                </label>
+                            </div>
+                            <button type="button" id="scene-text-add-btn" class="add-text-submit-btn">إضافة للمشهد</button>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="section">
                     <div class="collapsible-header">خامات الخزائن الأرضية</div>
@@ -360,23 +402,23 @@
                     <div class="collapsible-header">خامات ألارضية</div>
                     <div class="collapsible-content">
                         <div class="texture-buttons" id="floor-texture-buttons">
-                            <div class="texture-button" data-texture="texture_vatrenafloor/ceracic1.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceracic1.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/C10.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/C10.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/ceracic2.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceracic2.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/ceracic3.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceracic3.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/floor6.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor6.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/ceramic5.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceramic5.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/ceramic4.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceramic4.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/TilesCera.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/TilesCera.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/WoodFlor.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/WoodFlor.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/floor1.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor1.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/floor2.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor2.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/floor3.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor3.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/floor4.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor4.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/floor5.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor5.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/floor7.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor7.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenafloor/floor8.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor8.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/ceracic1.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceracic1.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/C10.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/C10.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/ceracic2.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceracic2.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/ceracic3.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceracic3.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/floor6.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor6.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/ceramic5.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceramic5.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/ceramic4.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/ceramic4.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/TilesCera.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/TilesCera.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/WoodFlor.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/WoodFlor.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/floor1.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor1.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/floor2.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor2.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/floor3.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor3.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/floor4.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor4.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/floor5.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor5.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/floor7.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor7.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/floor/floor8.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/floor/floor8.webp" /></div>
                         </div>
                     </div>
                 </div>
@@ -385,32 +427,32 @@
                     <div class="collapsible-header">خامات الجدران</div>
                     <div class="collapsible-content">
                         <div class="texture-buttons" id="wall-texture-buttons">
-                            <div class="texture-button" data-texture="texture_vatrenawall/white.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/white.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/creem.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/creem.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/gri.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/gri.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/dark-gri.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/dark-gri.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c21.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c21.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c22.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c22.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c23.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c23.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c24.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c24.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c25.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c25.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c26.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c26.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c27.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c27.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c28.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c28.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c29.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c29.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c3.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c3.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/Ozigo.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/Ozigo.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/C10.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/C10.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/C11.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/C11.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/C12.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/C12.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c13.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c13.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c14.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c14.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c15.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c15.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c16.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c16.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c17.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c17.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c18.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c18.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c19.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c19.webp" /></div>
-                            <div class="texture-button" data-texture="texture_vatrenawall/c20.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c20.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/white.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/white.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/creem.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/creem.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/gri.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/gri.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/dark-gri.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/dark-gri.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c21.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c21.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c22.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c22.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c23.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c23.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c24.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c24.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c25.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c25.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c26.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c26.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c27.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c27.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c28.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c28.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c29.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c29.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c3.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c3.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/Ozigo.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/Ozigo.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/C10.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/C10.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/C11.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/C11.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/C12.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/C12.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c13.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c13.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c14.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c14.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c15.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c15.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c16.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c16.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c17.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c17.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c18.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c18.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c19.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c19.webp" /></div>
+                            <div class="texture-button" data-texture="texture_vatrena/wall/c20.webp"><img loading="lazy" decoding="async" alt="" src="texture_vatrena/wall/c20.webp" /></div>
                         </div>
                     </div>
                 </div>
@@ -527,7 +569,7 @@
 
 </div>
 
-     <script type="module" src="script.js?v=151"></script>
+     <script type="module" src="script.js?v=159"></script>
 
      <div id="report-modal" class="report-modal">
         <div class="report-content">
