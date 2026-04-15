@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -72,6 +73,9 @@ let isVerticalMode = false;
 const undoStack = [];
 const MAX_UNDO_HISTORY = 20;
 
+/** يُخزَّن داخل JSON المشهد للتمييز البرمجي (الحفظ الفعلي في جدول vatrena_designs عبر save_vatrena_design.php) */
+const DESIGN_STORAGE_APP = 'vatrena_stores';
+
 // --- Textures State ---
 const DEFAULT_FLOOR_CABINET_TEXTURE = 'Kester';
 let currentFloorTexturePath = 'texture_vatrena/floor.webp';
@@ -85,10 +89,12 @@ const loadedTextures = {};
 // --- Interaction State ---
 let selectedObject = null;
 let selectedWall = null;
+let transformControls = null;
 let floor = null;
 let ceiling = null;
 let walls = [];
 let isDragging = false;
+let activeLayoutPointerId = null;
 let doubleClickTimeout = null;
 let cabinetBeingEdited = null;
 let sceneTextScaleEditing = null;
@@ -97,8 +103,6 @@ let originalBackgroundTexture = null;
 const dragPlane = new THREE.Plane();
 const dragOffset = new THREE.Vector3();
 const intersectionPoint = new THREE.Vector3();
-
-
 
 // --- Custom Room Builder State ---
 const crbState = {
@@ -125,6 +129,7 @@ const crbState = {
 
 // --- Constants ---
 const fixed90DegRotation = THREE.MathUtils.degToRad(90);
+const LAYOUT_ROTATION_SNAP_RAD = THREE.MathUtils.degToRad(5);
 const snapTolerance = 0.05;
 const CT_DEPTH_M = 0.60;
 const CT_THICK_M = 0.03;
@@ -272,6 +277,44 @@ const {
 
 
 originalBackgroundTexture = bgTexture;
+
+transformControls = new TransformControls(camera, renderer.domElement);
+transformControls.setSpace('world');
+transformControls.setMode('translate');
+transformControls.setSize(0.42);
+transformControls.setRotationSnap(LAYOUT_ROTATION_SNAP_RAD);
+scene.add(transformControls.getHelper());
+
+transformControls.addEventListener('dragging-changed', (event) => {
+    controls.enabled = !event.value;
+    const o = transformControls.object;
+    if (!o) return;
+    if (event.value) {
+        o.userData.tcPrevPos = o.position.clone();
+        return;
+    }
+    if (o.userData.tcPrevPos && !o.position.equals(o.userData.tcPrevPos)) {
+        o.userData.previousPosition = o.userData.tcPrevPos.clone();
+        saveUndoState('move', o);
+        delete o.userData.previousPosition;
+    }
+    delete o.userData.tcPrevPos;
+});
+transformControls.addEventListener('objectChange', () => {
+    const o = transformControls.object;
+    if (!o || transformControls.mode !== 'translate') return;
+    if (!snappingAndCollisionEnabled) return;
+    const ax = transformControls.axis;
+    o.updateMatrixWorld(true);
+    applyObjectSnappingAndPreventCollision(o);
+    clampLayoutObjectXZInRoom(o);
+    if (ax && (ax.includes('X') || ax.includes('Z'))) {
+        autoAlignToNearestWall(o);
+        o.updateMatrixWorld(true);
+        applyObjectSnappingAndPreventCollision(o);
+        clampLayoutObjectXZInRoom(o);
+    }
+});
 
 /* =========================================================================
    6. POST-PROCESSING (COMPOSER)
@@ -748,6 +791,21 @@ function isSceneLayoutObject(object) {
     return Boolean(object && (isCabinet(object) || object.name === 'scene-text'));
 }
 
+function objectSupportsTransformHandles(obj) {
+    if (!obj) return false;
+    return isSceneLayoutObject(obj) || obj.name === 'countertop' || obj.name === 'baseboard';
+}
+
+function syncSceneTransformControls() {
+    if (!transformControls) return;
+    if (!selectedObject || !objectSupportsTransformHandles(selectedObject)) {
+        transformControls.detach();
+        return;
+    }
+    transformControls.setMode('translate');
+    transformControls.attach(selectedObject);
+}
+
 function sceneTextFillCss(colorKey) {
     if (colorKey === 'gold') return '#c9a227';
     if (colorKey === 'steel') return '#9aa5b0';
@@ -1068,6 +1126,23 @@ function clampObjectInsideCustomRoom(object, desiredPos) {
     return nextPos;
 }
 
+function clampLayoutObjectXZInRoom(object) {
+    if (!object) return;
+    const box = new THREE.Box3().setFromObject(object);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const objHalfX = size.x / 2;
+    const objHalfZ = size.z / 2;
+    const roomHalfLength = currentRoomLength / 200;
+    const roomHalfWidth = currentRoomWidth / 200;
+    if (currentRoomPolygon && currentRoomPolygon.length >= 3) {
+        object.position.copy(clampObjectInsideCustomRoom(object, object.position.clone()));
+    } else {
+        object.position.x = Math.max(-roomHalfLength + objHalfX, Math.min(roomHalfLength - objHalfX, object.position.x));
+        object.position.z = Math.max(-roomHalfWidth + objHalfZ, Math.min(roomHalfWidth - objHalfZ, object.position.z));
+    }
+}
+
 
 // استبدل دالة applyObjectSnappingAndPreventCollision القديمة بهذه الدالة المعدلة
 function applyObjectSnappingAndPreventCollision(object) {
@@ -1089,7 +1164,7 @@ function applyObjectSnappingAndPreventCollision(object) {
 
     // 🌟 التعديل الثاني: استثناء الإزارة (baseboard) من التصادم لكي لا تعيق حركة الكابينات
     const snapTargets = scene.children.filter(obj => {
-       if (obj === object || obj === floor || obj === ceiling || obj === ambientLight || obj === directionalLight || obj === camera || obj.name === 'baseboard' || (!obj.isMesh && !obj.isGroup) || walls.includes(obj)) {
+       if (obj === object || obj === floor || obj === ceiling || obj === ambientLight || obj === directionalLight || obj === camera || obj.name === 'baseboard' || obj.isTransformControlsRoot || obj.userData?.isLayoutRotationRing || (!obj.isMesh && !obj.isGroup) || walls.includes(obj)) {
             return false;
         }
         return true;
@@ -1343,6 +1418,17 @@ function createProceduralSlatGeometry(widthCm, heightCm) {
 }
 
 
+/** صندوق محيط بالغرفة فقط (بدون جيزمو TransformControls ولا كابينات) لضبط الكاميرا */
+function expandRoomStructureBoundingBox(box) {
+    box.makeEmpty();
+    if (floor) box.expandByObject(floor);
+    if (ceiling) box.expandByObject(ceiling);
+    for (let i = 0; i < walls.length; i++) {
+        box.expandByObject(walls[i]);
+    }
+    return box;
+}
+
 function createWallMesh(wallWidth, height, depth, position, rotationY = 0) {
     // نستخدم الملف المنفصل لإنشاء المجسم
     const wall = createWallMeshStructure(wallWidth, height, depth, position, rotationY);
@@ -1423,18 +1509,20 @@ function createFloorAndWalls(roomLength, roomWidth) {
         changeWallTexture(currentWallTexturePath);
     }
 
-    // --- 7. ضبط الكاميرا ---
-    const bbox = new THREE.Box3().setFromObject(scene);
-    const center = bbox.getCenter(new THREE.Vector3());
-    const size = bbox.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fovRad = camera.fov * (Math.PI / 180);
-    let cameraZ = Math.abs(maxDim / 2 / Math.tan(fovRad / 2)) * 1.5;
-    camera.position.set(center.x + cameraZ * 0.6, center.y + cameraZ * 0.45, center.z + cameraZ);
-    camera.far = camera.position.distanceTo(center) + maxDim * 2.0;
-    camera.updateProjectionMatrix();
-    controls.target.copy(center);
-    controls.update();
+    // --- 7. ضبط الكاميرا (لا نستخدم المشهد كاملاً — جيزمو التحويل يوسّع الـ bbox بشكل خاطئ)
+    const bbox = expandRoomStructureBoundingBox(new THREE.Box3());
+    if (!bbox.isEmpty()) {
+        const center = bbox.getCenter(new THREE.Vector3());
+        const size = bbox.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const fovRad = camera.fov * (Math.PI / 180);
+        const cameraZ = Math.abs(maxDim / 2 / Math.tan(fovRad / 2)) * 1.5;
+        camera.position.set(center.x + cameraZ * 0.6, center.y + cameraZ * 0.45, center.z + cameraZ);
+        camera.far = camera.position.distanceTo(center) + maxDim * 2.0;
+        camera.updateProjectionMatrix();
+        controls.target.copy(center);
+        controls.update();
+    }
 }
 
 function addCabinetToScene(modelPath, isDoubleAttached = false, customY = null) {
@@ -1602,144 +1690,386 @@ function addCountertopL(lenXcm, lenZcm) {
 /* =========================================================================
    10. INTERACTION FUNCTIONS (MOUSE, DRAG, EVENTS)
    ========================================================================= */
-function handlePressDown(clientX, clientY) {
-    // 1. حساب إحداثيات الماوس وتجهيز الشعاع (Raycaster)
-    const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((clientX - rect.left) / sizes.width) * 2 - 1;
-    mouse.y = -((clientY - rect.top) / sizes.height) * 2 + 1;
-    raycaster.setFromCamera(new THREE.Vector2(mouse.x, mouse.y), camera);
+function walkToSceneRoot(obj) {
+    let o = obj;
+    while (o.parent && o.parent !== scene) o = o.parent;
+    return o;
+}
 
-    // 2. تحديد العناصر القابلة للنقر (تجاهل الأرضية)
-    const selectable = scene.children.filter(obj => obj !== floor && obj !== ceiling && (obj.name === 'wall' || obj.isGroup || obj.isMesh));
-    const intersects = raycaster.intersectObjects(selectable, true);
+/** منطق الالتقاط الجديد: الأسهم أولاً، ثم مساحة العنصر على الشاشة، ثم الجدار. */
+const OBJECT_SCREEN_PICK_PADDING_PX = 0;
+const VISIBLE_TRANSFORM_HANDLE_NAMES = new Set(['X', 'Y', 'Z', 'XY', 'XZ', 'YZ', 'XYZ']);
 
-    // 3. إعادة تعيين إضاءة الجدران (إلغاء التحديد السابق للجدار)
+function captureLayoutPointer(pointerId) {
+    if (pointerId == null) return;
+    activeLayoutPointerId = pointerId;
+    if (!canvas?.setPointerCapture) return;
+    try {
+        if (!canvas.hasPointerCapture(pointerId)) {
+            canvas.setPointerCapture(pointerId);
+        }
+    } catch {
+        // بعض المتصفحات/الويب فيو قد ترفض الالتقاط إن لم يبدأ السحب بعد.
+    }
+}
+
+function releaseLayoutPointer(pointerId = activeLayoutPointerId) {
+    if (pointerId == null) return;
+    if (canvas?.releasePointerCapture) {
+        try {
+            if (canvas.hasPointerCapture(pointerId)) {
+                canvas.releasePointerCapture(pointerId);
+            }
+        } catch {
+            // تجاهل فشل التحرير لأن المؤشر قد يكون أُلغي بالفعل.
+        }
+    }
+    if (activeLayoutPointerId === pointerId) {
+        activeLayoutPointerId = null;
+    }
+}
+
+function getProjectedObjectScreenRect(object, rect) {
+    if (!object || !rect) return null;
+    const box = getObjectWorldBoundingBox(object);
+    if (box.isEmpty()) return null;
+    const center = box.getCenter(new THREE.Vector3());
+    const projectedCenter = center.clone().project(camera);
+    if (
+        !Number.isFinite(projectedCenter.x) ||
+        !Number.isFinite(projectedCenter.y) ||
+        !Number.isFinite(projectedCenter.z) ||
+        projectedCenter.z < -1.5 ||
+        projectedCenter.z > 1.5
+    ) {
+        return null;
+    }
+
+    const corners = [
+        new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+        new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+        new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+        new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+        new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+        new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+        new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+        new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+    ];
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    corners.forEach((corner) => {
+        corner.project(camera);
+        if (Number.isFinite(corner.x) && Number.isFinite(corner.y)) {
+            const sx = rect.left + (corner.x * 0.5 + 0.5) * rect.width;
+            const sy = rect.top + (-corner.y * 0.5 + 0.5) * rect.height;
+            minX = Math.min(minX, sx);
+            minY = Math.min(minY, sy);
+            maxX = Math.max(maxX, sx);
+            maxY = Math.max(maxY, sy);
+        }
+    });
+
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+        return null;
+    }
+
+    return {
+        minX,
+        minY,
+        maxX,
+        maxY,
+        cameraDistance: camera.position.distanceTo(center),
+    };
+}
+
+function buildFallbackHitForObject(object) {
+    if (!object) return null;
+
+    const planeAnchor = object.position.clone();
+    if (object.name === 'scene-text') {
+        const box = getObjectWorldBoundingBox(object);
+        box.getCenter(planeAnchor);
+    }
+
+    if (isVerticalMode) {
+        const cameraDirection = new THREE.Vector3();
+        camera.getWorldDirection(cameraDirection);
+        dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, planeAnchor);
+    } else {
+        dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), planeAnchor);
+    }
+
+    const point = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(dragPlane, point)) {
+        point.copy(planeAnchor);
+    }
+
+    return { object, point };
+}
+
+/**
+ * مرور raycaster واحد على العناصر والجدران معاً.
+ * يُعيد أقرب هدف فيزيائي (مسافة من الكاميرا) مع نوعه.
+ * type: 'layout' | 'wall'
+ */
+function pickClosestSceneHit() {
+    const layoutCandidates = scene.children.filter((obj) =>
+        obj !== floor &&
+        obj !== ceiling &&
+        !obj.isTransformControlsRoot &&
+        objectSupportsTransformHandles(obj)
+    );
+
+    const hits = raycaster.intersectObjects([...layoutCandidates, ...walls], true);
+
+    for (const hit of hits) {
+        // تجاهل المش غير المرئية أو الشفافة تماماً (helperمخفية داخل النماذج)
+        if (!hit.object.visible) continue;
+        const mat = hit.object.material;
+        if (mat && !Array.isArray(mat) && mat.transparent && mat.opacity < 0.01) continue;
+
+        let obj = hit.object;
+        while (obj.parent && obj.parent !== scene) obj = obj.parent;
+
+        if (layoutCandidates.includes(obj)) return { type: 'layout', object: obj, point: hit.point };
+        if (walls.includes(obj))            return { type: 'wall',   object: obj, point: hit.point };
+    }
+    return null;
+}
+
+/** fallback قديم — يُستخدم فقط لو pickClosestSceneHit لم يُصب شيئاً */
+function pickLayoutObjectByRaycaster() {
+    return pickClosestSceneHit()?.type === 'layout' ? pickClosestSceneHit() : null;
+}
+
+function pickLayoutObjectByScreenBounds(clientX, clientY, rect) {
+    const candidates = scene.children.filter((obj) =>
+        obj !== floor &&
+        obj !== ceiling &&
+        !obj.isTransformControlsRoot &&
+        objectSupportsTransformHandles(obj)
+    );
+
+    let best = null;
+
+    candidates.forEach((obj) => {
+        const screenRect = getProjectedObjectScreenRect(obj, rect);
+        if (!screenRect) return;
+
+        if (
+            clientX < screenRect.minX - OBJECT_SCREEN_PICK_PADDING_PX ||
+            clientX > screenRect.maxX + OBJECT_SCREEN_PICK_PADDING_PX ||
+            clientY < screenRect.minY - OBJECT_SCREEN_PICK_PADDING_PX ||
+            clientY > screenRect.maxY + OBJECT_SCREEN_PICK_PADDING_PX
+        ) {
+            return;
+        }
+
+        const candidate = {
+            object: obj,
+            point: buildFallbackHitForObject(obj)?.point || obj.position.clone(),
+            cameraDistance: screenRect.cameraDistance,
+            area: Math.max(1, (screenRect.maxX - screenRect.minX) * (screenRect.maxY - screenRect.minY)),
+        };
+
+        if (!best) {
+            best = candidate;
+            return;
+        }
+
+        if (candidate.area + 1 < best.area) {
+            best = candidate;
+            return;
+        }
+        if (Math.abs(candidate.area - best.area) <= 1) {
+            if (candidate.cameraDistance + 0.001 < best.cameraDistance) {
+                best = candidate;
+                return;
+            }
+        }
+    });
+
+    return best;
+}
+
+function pickWallByPointerRay() {
+    if (!walls.length) return null;
+    const wallHits = raycaster.intersectObjects(walls, true);
+    return wallHits[0] || null;
+}
+
+function pickVisibleTransformHandleHit() {
+    const tcRoot = transformControls?.getHelper?.();
+    if (!tcRoot || !tcRoot.visible || !transformControls.enabled) return null;
+
+    const hits = raycaster.intersectObject(tcRoot, true);
+    return hits.find((hit) => {
+        const name = (hit.object?.name || '').toUpperCase();
+        return hit.object?.visible && VISIBLE_TRANSFORM_HANDLE_NAMES.has(name);
+    }) || null;
+}
+
+function handleLayoutObjectPress(object, hitPoint, clientX, clientY, pointerId = null) {
+    if (!object) return false;
+
+    if (selectedObject === object && (isCabinet(object) || object.name === 'scene-text')) {
+        if (doubleClickTimeout) {
+            clearTimeout(doubleClickTimeout);
+            doubleClickTimeout = null;
+            if (object.name === 'scene-text') {
+                showSceneTextScalePopup(object);
+            } else {
+                showDimensionsPopup(object);
+            }
+            return true;
+        }
+        doubleClickTimeout = setTimeout(() => {
+            doubleClickTimeout = null;
+        }, 300);
+    }
+
+    selectedWall = null;
+    beginLayoutObjectDrag(object, hitPoint, clientX, clientY, pointerId);
+    return true;
+}
+
+function beginLayoutObjectDrag(object, hitPoint, clientX, clientY, pointerId = null) {
+    if (!object) return false;
+
+    selectedWall = null;
+    selectedObject = object;
+    object.userData.previousPosition = object.position.clone();
+    controls.enabled = false;
+    isDragging = true;
+    captureLayoutPointer(pointerId);
+    previousClientPosition.set(clientX, clientY);
+
+    const dragHitPoint = hitPoint ? hitPoint.clone() : buildFallbackHitForObject(object)?.point || object.position.clone();
+    if (isVerticalMode) {
+        const cameraDirection = new THREE.Vector3();
+        camera.getWorldDirection(cameraDirection);
+        dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, dragHitPoint);
+    } else {
+        dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), dragHitPoint);
+    }
+    dragOffset.copy(dragHitPoint).sub(selectedObject.position);
+
+    if (typeof floatingToolbar !== 'undefined' && floatingToolbar) {
+        if (isSceneLayoutObject(object) || object.name === 'countertop') {
+            floatingToolbar.style.display = 'flex';
+            floatingToolbar.classList.remove('expanded');
+            if (ftMainToggleBtn) ftMainToggleBtn.querySelector('i').className = 'fas fa-tools';
+            if (typeof ftVerticalBtn !== 'undefined' && ftVerticalBtn) {
+                if (isVerticalMode) ftVerticalBtn.classList.add('active');
+                else ftVerticalBtn.classList.remove('active');
+            }
+            if (typeof updateFloatingToolbarPosition === 'function') {
+                updateFloatingToolbarPosition();
+            }
+        } else {
+            floatingToolbar.style.display = 'none';
+        }
+    }
+
+    return true;
+}
+
+/** تقريب زاوية Y لأقرب مضاعف لخطوة التدوير (مثلاً 5°) */
+function snapLayoutRotationYToFiveDegrees(object) {
+    if (!object) return;
+    object.rotation.y = Math.round(object.rotation.y / LAYOUT_ROTATION_SNAP_RAD) * LAYOUT_ROTATION_SNAP_RAD;
+}
+
+/**
+ * تفاعل المشهد: pointerdown مع capture قبل OrbitControls (الذي يستخدم pointer في Three r174).
+ * استخدام mousedown فقط كان يجعل أول نقرة تعمل ثم pointerdown يفوز بالنقرة الثانية فيدور الكاميرا بدل السحب.
+ */
+function handlePressDown(clientX, clientY, pointerId = null) {
     walls.forEach(w => {
         if (w.material.emissive) {
             w.material.emissive.setHex(0x000000);
         }
     });
 
-    // 4. معالجة التقاطعات
-    if (intersects.length > 0) {
-        // الوصول إلى الكائن الرئيسي (Group) بدلاً من الـ Mesh الفرعي
-        let obj = intersects[0].object;
-        while (obj.parent && obj.parent !== scene) obj = obj.parent;
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((clientX - rect.left) / sizes.width) * 2 - 1;
+    mouse.y = -((clientY - rect.top) / sizes.height) * 2 + 1;
+    raycaster.setFromCamera(new THREE.Vector2(mouse.x, mouse.y), camera);
 
-        if (obj.name === 'wall') {
-            // --- حالة اختيار جدار ---
-            selectedWall = obj;
-            selectedObject = null;
-            
-            // >>> تعديل: إخفاء الشريط العائم <<<
-            if (typeof floatingToolbar !== 'undefined' && floatingToolbar) {
-                floatingToolbar.style.display = 'none';
-                floatingToolbar.classList.remove('expanded');
-                if (ftMainToggleBtn) ftMainToggleBtn.querySelector('i').className = 'fas fa-tools';
-                if (typeof ftColorMenu !== 'undefined' && ftColorMenu) ftColorMenu.classList.remove('show'); 
-            }
-            
-            // تمييز الجدار بلون
-            if (!obj.material.emissive) obj.material.emissive = new THREE.Color(0x000000);
-            obj.material.emissive.setHex(0x333333);
-            
-            controls.enabled = true;
-            isDragging = false;
+    // 1) مرور raycaster واحد على العناصر والجدران — أقرب هدف فيزيائي يفوز
+    const sceneHit = pickClosestSceneHit();
 
-            // >>> تعديل: إخفاء الشريط العائم عند اختيار جدار <<<
-            if (typeof floatingToolbar !== 'undefined' && floatingToolbar) {
-                floatingToolbar.style.display = 'none';
-            }
+    if (sceneHit?.type === 'layout') {
+        handleLayoutObjectPress(sceneHit.object, sceneHit.point, clientX, clientY, pointerId);
+        updateTransformButtonsState();
+        updateDeleteButtonState();
+        updateSelectionIndicator();
+        return;
+    }
 
-        } else {
-            // --- حالة اختيار كابينة أو عنصر آخر ---
-            
-            // منطق النقر المزدوج (Double Click) — كابينة: أبعاد | نص مشهد: حجم
-            if (selectedObject === obj && (isCabinet(obj) || obj.name === 'scene-text')) {
-                if (doubleClickTimeout) {
-                    clearTimeout(doubleClickTimeout);
-                    doubleClickTimeout = null;
-                    if (obj.name === 'scene-text') {
-                        showSceneTextScalePopup(obj);
-                    } else {
-                        showDimensionsPopup(obj);
-                    }
-                    return;
-                } else {
-                    doubleClickTimeout = setTimeout(() => {
-                        doubleClickTimeout = null;
-                    }, 300);
-                }
-            }
-
-            selectedWall = null;
-            selectedObject = obj;
-            
-            // حفظ الموقع الأصلي قبل بدء السحب
-            obj.userData.previousPosition = obj.position.clone();
-            
-            controls.enabled = false; // تعطيل تحكم الكاميرا أثناء السحب
-            isDragging = true;
-            previousClientPosition.set(clientX, clientY);
-
-            // ==========================================
-            // التعديل الجديد: حساب نقطة الإمساك الدقيقة 100%
-            // ==========================================
-            if (intersects.length > 0) {
-                if (isVerticalMode) {
-                    // في حالة الحركة العمودية، نصنع مستوى مواجه للكاميرا
-                    const cameraDirection = new THREE.Vector3();
-                    camera.getWorldDirection(cameraDirection);
-                    dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, intersects[0].point);
-                } else {
-                    // في الحركة الأفقية، نصنع مستوى يوازي الأرض (مواجه للأعلى Y)
-                    dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), intersects[0].point);
-                }
-                // حساب الفارق بين نقطة النقر ومركز العنصر
-                dragOffset.copy(intersects[0].point).sub(selectedObject.position);
-            }
-            // ==========================================
-
-            // >>> تعديل: إظهار الشريط العائم وتحديثه <<<
-            if (typeof floatingToolbar !== 'undefined' && floatingToolbar) {
-                // نظهر الشريط للكابينات والنصوص والأسطح
-                if (isSceneLayoutObject(obj) || obj.name === 'countertop') {
-                    floatingToolbar.style.display = 'flex'; 
-                    floatingToolbar.classList.remove('expanded'); // يبدأ الزر وهو مغلق (أيقونة فقط)
-                    if (ftMainToggleBtn) ftMainToggleBtn.querySelector('i').className = 'fas fa-tools';
-                    
-                    // تحديث حالة زر الحركة العمودية في الشريط ليتطابق مع الوضع الحالي
-                    if (typeof ftVerticalBtn !== 'undefined' && ftVerticalBtn) {
-                        if (isVerticalMode) ftVerticalBtn.classList.add('active');
-                        else ftVerticalBtn.classList.remove('active');
-                    }
-                    
-                    // تحديث موقع الشريط فوراً لكي لا يظهر في مكان خاطئ للحظة الأولى
-                    if (typeof updateFloatingToolbarPosition === 'function') {
-                        updateFloatingToolbarPosition();
-                    }
-                } else {
-                    floatingToolbar.style.display = 'none';
-                }
-            }
-        }
-    } else {
-        // --- حالة النقر في الفراغ (إلغاء التحديد) ---
-        selectedWall = null;
+    if (sceneHit?.type === 'wall') {
+        const obj = sceneHit.object;
+        selectedWall = obj;
         selectedObject = null;
+
+        if (typeof floatingToolbar !== 'undefined' && floatingToolbar) {
+            floatingToolbar.style.display = 'none';
+            floatingToolbar.classList.remove('expanded');
+            if (ftMainToggleBtn) ftMainToggleBtn.querySelector('i').className = 'fas fa-tools';
+            if (typeof ftColorMenu !== 'undefined' && ftColorMenu) ftColorMenu.classList.remove('show');
+        }
+
+        if (!obj.material.emissive) obj.material.emissive = new THREE.Color(0x000000);
+        obj.material.emissive.setHex(0x333333);
         controls.enabled = true;
         isDragging = false;
 
-        // >>> تعديل: إخفاء الشريط العائم <<<
-        if (typeof floatingToolbar !== 'undefined' && floatingToolbar) {
-            floatingToolbar.style.display = 'none';
-        }
+        updateTransformButtonsState();
+        updateDeleteButtonState();
+        updateSelectionIndicator();
+        return;
     }
 
-    // 5. تحديث واجهة المستخدم (الأزرار الجانبية ومؤشر التحديد)
+    // 2) الأسهم (gizmo) — فقط إن لم يُصب raycaster أي شيء
+    const gizmoHit = pickVisibleTransformHandleHit();
+    if (gizmoHit) {
+        return;
+    }
+
+    // 3) fallback: الصندوق المحيط (للنماذج ذات الـ raycast المعطّل)
+    const boundsHit = pickLayoutObjectByScreenBounds(clientX, clientY, rect);
+    if (boundsHit) {
+        handleLayoutObjectPress(boundsHit.object, boundsHit.point, clientX, clientY, pointerId);
+        updateTransformButtonsState();
+        updateDeleteButtonState();
+        updateSelectionIndicator();
+        return;
+    }
+
+    // 4) فراغ — إلغاء التحديد
+    selectedWall = null;
+    selectedObject = null;
+    controls.enabled = true;
+    isDragging = false;
+
+    if (typeof floatingToolbar !== 'undefined' && floatingToolbar) {
+        floatingToolbar.style.display = 'none';
+    }
+
     updateTransformButtonsState();
     updateDeleteButtonState();
     updateSelectionIndicator();
+}
+
+/** إنهاء السحب عند رفع المؤشر خارج الكانفس (تفادي بقاء isDragging) */
+function releaseLayoutPointerIfNeeded() {
+    if (isDragging) {
+        handlePressUp();
+    }
 }
 
 // دالة لتحديث حالة وشكل أزرار الحركة العمودية (الجانبي والمنبثق)
@@ -1763,7 +2093,6 @@ function updateAllVerticalButtonsUI(isActive) {
 
 function handleMove(clientX, clientY) {
     if (isDragging && selectedObject) {
-        // تحديث إحداثيات الماوس لإطلاق الشعاع
         const rect = renderer.domElement.getBoundingClientRect();
         mouse.x = ((clientX - rect.left) / sizes.width) * 2 - 1;
         mouse.y = -((clientY - rect.top) / sizes.height) * 2 + 1;
@@ -1815,6 +2144,7 @@ function handleMove(clientX, clientY) {
                     
                     // 4. الدوران التلقائي نحو أقرب حائط
                     autoAlignToNearestWall(selectedObject);
+                    snapLayoutRotationYToFiveDegrees(selectedObject);
 
                     // 5. تطبيق التصادم والمحاذاة (سناب) النهائي
                     selectedObject.updateMatrixWorld(true);
@@ -1832,7 +2162,7 @@ function handleMove(clientX, clientY) {
         previousClientPosition.set(clientX, clientY);
     }
 }
-function handlePressUp() { 
+function handlePressUp() {
     // إذا كان هناك كائن محدد وتم تحريكه، احفظ الحالة
     if (isDragging && selectedObject && selectedObject.userData.previousPosition) {
         const moved = !selectedObject.position.equals(selectedObject.userData.previousPosition);
@@ -1841,8 +2171,9 @@ function handlePressUp() {
         }
     }
     
-    isDragging = false; 
-    controls.enabled = true; 
+    isDragging = false;
+    controls.enabled = true;
+    releaseLayoutPointer();
 }
 
 function mirrorSelectedObject() { if (selectedObject) { selectedObject.scale.x *= -1; } }
@@ -1886,6 +2217,7 @@ function updateSelectionIndicator() {
         selectionIndicator.style.display = 'none';
     }
     syncAddTextPanelFromSelection();
+    syncSceneTransformControls();
 }
 
 // دالة مساعدة لمعرفة هل الجهاز موبايل أم كمبيوتر
@@ -1977,7 +2309,7 @@ function saveCanvasAsImage() {
     const mode = sketchPass.enabled ? '_sketch' : '';
     const fileName = `vatrena_design${mode}_${timestamp}.png`;
 
-    smartSaveImage(dataURL, fileName, 'تصميم المطبخ');
+    smartSaveImage(dataURL, fileName, 'تصميم فاترينة المحل');
 }
 
 /* =========================================================================
@@ -2029,20 +2361,39 @@ window.addEventListener('resize', recomputeCanvasSize);
 
 // --- Keyboard Events - اختصار Ctrl+Z للتراجع ---
 window.addEventListener('keydown', (e) => {
-    // التحقق من Ctrl+Z (أو Cmd+Z على Mac)
     if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        e.preventDefault(); // منع السلوك الافتراضي للمتصفح
+        e.preventDefault();
         void performUndo();
     }
 });
 
-// --- Mouse/Touch Events ---
-canvas.addEventListener('mousedown', (e) => handlePressDown(e.clientX, e.clientY));
-canvas.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY));
-canvas.addEventListener('mouseup', handlePressUp);
-canvas.addEventListener('touchstart', (e) => { if (e.touches.length === 1) handlePressDown(e.touches[0].clientX, e.touches[0].clientY); });
-canvas.addEventListener('touchmove', (e) => { if (e.touches.length === 1) handleMove(e.touches[0].clientX, e.touches[0].clientY); });
-canvas.addEventListener('touchend', handlePressUp);
+// --- Pointer: pointerdown بـ capture يعمل قبل OrbitControls فيعطّل الأوربت قبل ما يمسك المؤشر ---
+canvas.addEventListener(
+    'pointerdown',
+    (e) => {
+        if (!e.isPrimary) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        handlePressDown(e.clientX, e.clientY, e.pointerId);
+    },
+    { capture: true }
+);
+canvas.addEventListener('pointermove', (e) => {
+    if (!e.isPrimary) return;
+    handleMove(e.clientX, e.clientY);
+});
+canvas.addEventListener('pointerup', (e) => {
+    if (!e.isPrimary) return;
+    handlePressUp();
+});
+canvas.addEventListener('pointercancel', (e) => {
+    if (!e.isPrimary) return;
+    handlePressUp();
+});
+canvas.addEventListener('lostpointercapture', () => {
+    activeLayoutPointerId = null;
+});
+window.addEventListener('pointerup', releaseLayoutPointerIfNeeded);
+window.addEventListener('pointercancel', releaseLayoutPointerIfNeeded);
 canvas.addEventListener('dblclick', () => {
     if (!selectedObject) return;
     if (selectedObject.name === 'scene-text') {
@@ -2183,6 +2534,7 @@ startDesignBtn.addEventListener('click', () => {
     loadingOverlay.style.display = 'flex';
     setTimeout(() => {
         webglContainer.style.display = 'block';
+        if (canvas) canvas.style.touchAction = 'none';
         createFloorAndWalls(currentRoomLength, currentRoomWidth);
         warmUpModelPipeline();
         populateModelList('vatrenaCabinetsList', vatrenaCabinets);
@@ -2909,6 +3261,7 @@ function startCustomDesign() {
 
     setTimeout(() => {
         webglContainer.style.display = 'block';
+        if (canvas) canvas.style.touchAction = 'none';
         createCustomFloorAndWalls(centeredPoints);
         warmUpModelPipeline();
         populateModelList('vatrenaCabinetsList',         vatrenaCabinets);
@@ -2975,18 +3328,20 @@ function createCustomFloorAndWalls(polygonPoints) {
     // --- تطبيق خامة الجدران ---
     if (currentWallTexturePath) changeWallTexture(currentWallTexturePath);
 
-    // --- ضبط الكاميرا ---
-    const bbox = new THREE.Box3().setFromObject(scene);
-    const center = bbox.getCenter(new THREE.Vector3());
-    const size   = bbox.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fovRad = camera.fov * (Math.PI / 180);
-    const camDist = Math.abs(maxDim / 2 / Math.tan(fovRad / 2)) * 1.5;
-    camera.position.set(center.x + camDist * 0.6, center.y + camDist * 0.45, center.z + camDist);
-    camera.far = camera.position.distanceTo(center) + maxDim * 2.0;
-    camera.updateProjectionMatrix();
-    controls.target.copy(center);
-    controls.update();
+    // --- ضبط الكاميرا (أرضية/سقف/جدران فقط — بدون جيزمو التحويل)
+    const bbox = expandRoomStructureBoundingBox(new THREE.Box3());
+    if (!bbox.isEmpty()) {
+        const center = bbox.getCenter(new THREE.Vector3());
+        const size = bbox.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const fovRad = camera.fov * (Math.PI / 180);
+        const camDist = Math.abs(maxDim / 2 / Math.tan(fovRad / 2)) * 1.5;
+        camera.position.set(center.x + camDist * 0.6, center.y + camDist * 0.45, center.z + camDist);
+        camera.far = camera.position.distanceTo(center) + maxDim * 2.0;
+        camera.updateProjectionMatrix();
+        controls.target.copy(center);
+        controls.update();
+    }
 }
 
 function performDeletion() {
@@ -3403,12 +3758,11 @@ ftVerticalBtn?.addEventListener('click', () => {
 // 3. زر التدوير
 ftRotateBtn?.addEventListener('click', () => {
     if (selectedObject) {
-        // حفظ الحالة قبل التدوير
         selectedObject.userData.previousRotation = selectedObject.rotation.clone();
         saveUndoState('rotate', selectedObject);
-        
-        // تدوير 90 درجة (نفس زر rotateYPos90)
+
         selectedObject.rotation.y += fixed90DegRotation;
+        snapLayoutRotationYToFiveDegrees(selectedObject);
     }
 });
 
@@ -3528,6 +3882,7 @@ ftDuplicateBtn?.addEventListener('click', () => {
     if (typeof updateFloatingToolbarPosition === 'function') {
         updateFloatingToolbarPosition();
     }
+    syncSceneTransformControls();
 });
 
 // --- Cabinet Dimensions ---
@@ -4312,8 +4667,8 @@ controlsPanel?.addEventListener('mouseenter', () => {
     controls.enabled = false;
 });
 controlsPanel?.addEventListener('mouseleave', () => {
-    // لا نُعيد تفعيل Controls إذا كان المستخدم يسحب كابينة حالياً
-    if (!isDragging) controls.enabled = true;
+    // لا نُعيد تفعيل Controls أثناء سحب عنصر أو أسهم TransformControls
+    if (!isDragging && !transformControls?.dragging) controls.enabled = true;
 });
 
 // 2. إصلاح Scroll في عناصر القائمة - يمنع تسرب الأحداث لـ canvas
@@ -4463,6 +4818,7 @@ printReportBtn?.addEventListener('click', () => {
    ========================================================================= */
 function serializeScene() {
     const sceneData = {
+        appId: DESIGN_STORAGE_APP,
        room: {
            length: currentRoomLength,
            width: currentRoomWidth,
@@ -4517,6 +4873,7 @@ function serializeScene() {
 }
 
 function clearScene() {
+    if (transformControls) transformControls.detach();
     const toRemove = [];
     scene.children.forEach(child => {
         if (child.isGroup && (isCabinet(child) || child.name === 'countertop' || child.name === 'baseboard' || child.name === 'scene-text')) {
@@ -4891,10 +5248,14 @@ async function saveCurrentDesign() {
     loadingOverlay.style.display = 'flex';
     try {
         const designData = serializeScene();
-        const response = await fetch('save_design.php', {
+        const response = await fetch('save_vatrena_design.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: designName, design_json: designData })
+            body: JSON.stringify({
+                name: designName,
+                app: DESIGN_STORAGE_APP,
+                design_json: designData,
+            }),
         });
         const result = await response.json();
         if (result.success) { alert('تم حفظ التصميم بنجاح!'); loadDesignsList(); }
@@ -4910,7 +5271,7 @@ async function loadDesignsList() {
     listElement.innerHTML = '';
     msgElement.textContent = 'جاري التحميل...';
     try {
-        const response = await fetch('load_designs.php');
+        const response = await fetch('load_vatrena_designs.php');
         const result = await response.json();
         if (result.success && result.designs.length > 0) {
             msgElement.style.display = 'none';
@@ -4947,7 +5308,7 @@ async function loadSpecificDesign(designId) {
     if (!confirm('هل أنت متأكد؟ سيتم حذف التصميم الحالي (غير المحفوظ) وتحميل التصميم المختار.')) return;
     loadingOverlay.style.display = 'flex';
     try {
-        const response = await fetch(`get_design.php?id=${designId}`);
+        const response = await fetch(`get_vatrena_design.php?id=${encodeURIComponent(designId)}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const responseText = await response.text();
         let designData;
@@ -4962,7 +5323,7 @@ async function deleteDesign(designId) {
     if (!confirm('هل أنت متأكد من حذف هذا التصميم؟ لا يمكن التراجع عن هذا الإجراء.')) return;
     loadingOverlay.style.display = 'flex';
     try {
-        const response = await fetch('delete_design.php', {
+        const response = await fetch('delete_vatrena_design.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: designId })

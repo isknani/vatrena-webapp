@@ -7,7 +7,7 @@ import * as THREE from 'three';
 // 1. إنشاء مجسم الحائط (بدون إضافته للمشهد)
 export function createWallMeshStructure(wallWidth, height, depth, position, rotationY = 0) {
     const geometry = new THREE.BoxGeometry(wallWidth, height, depth);
-    const material = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+    const material = new THREE.MeshStandardMaterial({ color: 0xcccccc, side: THREE.DoubleSide });
     const wall = new THREE.Mesh(geometry, material);
     
     wall.position.copy(position);
