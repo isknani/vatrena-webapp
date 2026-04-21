@@ -58,8 +58,8 @@ const RUNPOD_API_KEY = "";
 
 // --- Scene Dimensions & State ---
 const sizes = { width: window.innerWidth, height: window.innerHeight };
-let currentRoomLength = 400;
-let currentRoomWidth = 300;
+let currentRoomLength = 600;
+let currentRoomWidth = 500;
 let currentRoomHeight = 280;
 let currentRoomPolygon = null;
 let snappingAndCollisionEnabled = true;

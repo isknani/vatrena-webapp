@@ -53,7 +53,7 @@ const middleVatrenaSpecs = [
     { name: '200', file: 'mv2' },
     { name: '100', file: 'mv3' },
     { name: '100', file: 'mv4' },
-    { name: '100', file: 'mv5' },
+    { name: '200', file: 'mv5' },
     { name: '100', file: 'mv6' },
     { name: '100', file: 'mv7d' },
     { name: '100', file: 'mv8' },
