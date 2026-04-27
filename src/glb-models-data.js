@@ -63,8 +63,6 @@ export const middleVatrenaCabinets = middleVatrenaSpecs.map(({ name, file }) => 
     path: `${MIDDLE_VATRENA_DIR}/${file}.glb`,
     thumbnail: `${MIDDLE_VATRENA_THUMB}/${file}.webp`,
 }));
-middleVatrenaCabinets.push({ name: 'ستربات', path: 'PROCEDURAL_SLAT', thumbnail: 'thumbnails_vatrena/mdf.webp' });
-
 
 
 

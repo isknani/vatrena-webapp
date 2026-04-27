@@ -613,8 +613,8 @@ const videoURL = `https://www.youtube.com/embed/DAfm4TR3Lgc?autoplay=1`;
                 <span style="color:#888; font-size:12px;">سم</span>
             </div>
             <div class="crb-input-group" style="display:flex; align-items:center; gap:5px; background:rgba(255,255,255,0.06); padding:4px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.1);">
-                <label style="color:#aaa; font-size:12px; white-space:nowrap;">طول الجدار:</label>
-                <input type="number" id="crb-wall-length-input" placeholder="تلقائي" min="10" step="10" style="width:75px; padding:4px 6px; border-radius:4px; border:1px solid #3d3d6b; background:#252545; color:white; font-size:13px; text-align:center;">
+                <label style="color:#aaa; font-size:12px; white-space:nowrap;">طول آخر ضلع:</label>
+                <input type="number" id="crb-wall-length-input" placeholder="ثبت أول ضلع" min="10" step="10" style="width:90px; padding:4px 6px; border-radius:4px; border:1px solid #3d3d6b; background:#252545; color:white; font-size:13px; text-align:center;">
                 <span style="color:#888; font-size:12px;">سم</span>
             </div>
             <button id="crb-undo-btn" class="crb-btn crb-btn-undo" title="تراجع عن آخر نقطة" style="padding:7px 13px; border-radius:6px; border:none; cursor:pointer; font-size:13px; font-weight:bold; display:flex; align-items:center; gap:5px; background:#e67e22; color:white; white-space:nowrap;">
@@ -633,8 +633,11 @@ const videoURL = `https://www.youtube.com/embed/DAfm4TR3Lgc?autoplay=1`;
     </div>
     <div class="crb-canvas-wrapper" style="flex:1; position:relative; overflow:hidden; cursor:crosshair; min-height:0; background:#12121f;">
         <canvas id="crb-canvas" style="display:block; position:absolute; top:0; left:0; touch-action:none;"></canvas>
+        <button id="crb-length-focus-btn" class="crb-quick-length-btn" type="button" title="تعديل الطول: حقل آخر جدار (Enter) أو من البداية بـ Shift+Enter عند 3+ زوايا">
+            <i class="fas fa-ruler-horizontal"></i> تعديل الطول
+        </button>
         <div class="crb-hint-bar" id="crb-hint-bar" style="position:absolute; bottom:14px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.78); color:rgba(255,255,255,0.88); padding:7px 18px; border-radius:20px; font-size:12px; pointer-events:none; white-space:nowrap; z-index:10; border:1px solid rgba(255,255,255,0.08);">
-            انقر لوضع نقطة &bull; الجدران عمودية/أفقية فقط &bull; اقترب من <span style="color:#FF5722">●</span> لإغلاق الشكل &bull; وجّه الفأرة &rarr; اكتب الطول &rarr; اضغط <kbd style="background:rgba(255,255,255,0.2);padding:1px 5px;border-radius:3px;">Enter</kbd> &bull; عجلة الماوس للتكبير
+            انقر لتثبيت زاوية واحدة على الحاسوب أو اسحب لرسم أول ضلع باللمس &bull; الزوم باللمس يتم بإصبعين &bull; الجدران عمودية/أفقية فقط &bull; اقترب من <span style="color:#FF5722">●</span> لإغلاق الشكل &bull; <strong>نقطة أولى فقط:</strong> حرّك الماوس لاختيار اتجاه الجدار الأفقي/العمودي ثم <kbd style="background:rgba(255,255,255,0.2);padding:1px 5px;border-radius:3px;">Enter</kbd> لإكمال نفس الضلع بالمتر (أو <kbd>Tab</kbd> للحقل) &bull; بعد نقطتين: <kbd>Enter</kbd> يعدّل طول <em>آخر</em> جدار مثبّت؛ مع 3+ زوايا: <kbd style="background:rgba(255,255,255,0.2);padding:1px 5px;border-radius:3px;">Shift+Enter</kbd> لضبط طول <em>الجدار من نقطة البداية</em> دون كسر الشكل &bull; عجلة الماوس للتكبير
         </div>
     </div>
 </div>

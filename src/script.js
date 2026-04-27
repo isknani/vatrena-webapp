@@ -122,6 +122,19 @@ const crbState = {
     panStartZ: 0,
     // تجميد اتجاه الحائط عند التركيز على حقل الإدخال
     frozenDir: null,  // { isHorizontal, signX, signZ } | null
+    touchStarted: false,
+    touchMoved: false,
+    pointerDown: false,
+    pointerMoved: false,
+    activePointerId: null,
+    pointerDownClientX: 0,
+    pointerDownClientY: 0,
+    lastCommitAt: 0,
+    touchPoints: new Map(),
+    isPinchZooming: false,
+    pinchStartDistance: 0,
+    pinchStartScale: 100,
+    pinchAnchorWorld: null,
     // Named pan handlers stored here so they can be removed and don't accumulate
     _onPanMouseDown: null,
     _onPanMouseMove: null,
@@ -2813,65 +2826,350 @@ function getCRBEventPos(e) {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
 }
 
-// --- معالج النقر ---
-function onCRBClick(e) {
-    if (e.button !== 0 || crbState.isComplete) return;
-    const { x: px, y: py } = getCRBEventPos(e);
-    const raw = crbPxToWorld(px, py);
+function getCRBLocalPosFromClient(clientX, clientY) {
+    const rect = crbState.canvas.getBoundingClientRect();
+    return { x: clientX - rect.left, y: clientY - rect.top };
+}
+
+function updateCRBTouchPoint(e) {
+    if (e.pointerType !== 'touch') return;
+    crbState.touchPoints.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+}
+
+function removeCRBTouchPoint(pointerId) {
+    crbState.touchPoints.delete(pointerId);
+}
+
+function getCRBPinchTouches() {
+    const touches = Array.from(crbState.touchPoints.values());
+    return touches.length >= 2 ? touches.slice(0, 2) : null;
+}
+
+function beginCRBPinchZoom() {
+    const touches = getCRBPinchTouches();
+    if (!touches) return false;
+
+    const [a, b] = touches;
+    const centerClientX = (a.clientX + b.clientX) / 2;
+    const centerClientY = (a.clientY + b.clientY) / 2;
+    const localCenter = getCRBLocalPosFromClient(centerClientX, centerClientY);
+    const dx = b.clientX - a.clientX;
+    const dy = b.clientY - a.clientY;
+
+    crbState.isPinchZooming = true;
+    crbState.pinchStartDistance = Math.max(Math.hypot(dx, dy), 1);
+    crbState.pinchStartScale = crbState.scale;
+    crbState.pinchAnchorWorld = crbPxToWorld(localCenter.x, localCenter.y);
+    crbState.pointerDown = false;
+    crbState.pointerMoved = false;
+    crbState.activePointerId = null;
+    return true;
+}
+
+function updateCRBPinchZoom() {
+    if (!crbState.isPinchZooming) return;
+    const touches = getCRBPinchTouches();
+    if (!touches) return;
+
+    const [a, b] = touches;
+    const dx = b.clientX - a.clientX;
+    const dy = b.clientY - a.clientY;
+    const nextDistance = Math.max(Math.hypot(dx, dy), 1);
+    const centerClientX = (a.clientX + b.clientX) / 2;
+    const centerClientY = (a.clientY + b.clientY) / 2;
+    const localCenter = getCRBLocalPosFromClient(centerClientX, centerClientY);
+    const nextScale = Math.max(25, Math.min(350, crbState.pinchStartScale * (nextDistance / crbState.pinchStartDistance)));
+    const w = crbState.canvas.clientWidth;
+    const h = crbState.canvas.clientHeight;
+    const anchor = crbState.pinchAnchorWorld;
+
+    crbState.scale = nextScale;
+    crbState.offsetX = localCenter.x - w / 2 - anchor.x * nextScale;
+    crbState.offsetZ = localCenter.y - h / 2 - anchor.z * nextScale;
+    drawCRB();
+}
+
+function stopCRBPinchZoom() {
+    crbState.isPinchZooming = false;
+    crbState.pinchStartDistance = 0;
+    crbState.pinchStartScale = crbState.scale;
+    crbState.pinchAnchorWorld = null;
+}
+
+function getCRBDimInput() {
+    return document.getElementById('crb-wall-length-input');
+}
+
+function setCRBStartButtonEnabled(enabled) {
+    const startBtn = document.getElementById('crb-start-btn');
+    if (!startBtn) return;
+    startBtn.disabled = !enabled;
+    startBtn.style.opacity = enabled ? '1' : '0.4';
+    startBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+}
+
+function getCRBLastSegmentLengthCm() {
+    if (crbState.points.length < 2) return null;
+    const last = crbState.points[crbState.points.length - 1];
+    const prev = crbState.points[crbState.points.length - 2];
+    return Math.round(Math.hypot(last.x - prev.x, last.z - prev.z) * 100);
+}
+
+/** قيمة المقترح لحقل الطول: مع نقطة واحدة = طول الضلع قيد الرسم (من آخر نثبتة نحو الماوس) */
+function getCRBLengthValueCmForField() {
+    if (crbState.points.length < 1) return null;
+    if (crbState.points.length === 1) {
+        const a = crbState.points[0];
+        const d = Math.hypot(crbState.mouseX - a.x, crbState.mouseZ - a.z) * 100;
+        if (d < 0.1) return null;
+        return Math.round(d);
+    }
+    return getCRBLastSegmentLengthCm();
+}
+
+function clearCRBLengthInput(placeholder = null) {
+    const dimInput = getCRBDimInput();
+    if (!dimInput) return;
+    dimInput.value = '';
+    if (placeholder !== null) {
+        dimInput.placeholder = placeholder;
+    }
+}
+
+function updateCRBLengthPlaceholder() {
+    const dimInput = getCRBDimInput();
+    if (!dimInput) return;
+
+    if (crbState.points.length >= 2) {
+        const lastLenCm = getCRBLastSegmentLengthCm();
+        dimInput.placeholder = lastLenCm ? `${lastLenCm} سم` : 'آخر ضلع';
+        return;
+    }
+
+    if (crbState.points.length === 1) {
+        const last = crbState.points[0];
+        const lenCm = Math.round(Math.hypot(crbState.mouseX - last.x, crbState.mouseZ - last.z) * 100);
+        dimInput.placeholder = lenCm > 0 ? `${lenCm} سم` : 'ثبت الجدار التالي';
+        return;
+    }
+
+    dimInput.placeholder = 'ثبت أول ضلع';
+}
+
+function commitCurrentCorner(raw) {
+    if (crbState.isComplete) return false;
 
     let finalPos;
     if (crbState.points.length === 0) {
         finalPos = crbSnapGrid(raw.x, raw.z);
     } else {
-        // التقاط نقطة البداية يتم على الموضع الخام (لا المقيّد) للسهولة
         if (crbState.points.length >= 3 && crbNearStart(raw.x, raw.z)) {
             crbClose();
-            return;
+            return true;
         }
 
-        // هل جمّد المستخدم الاتجاه وأدخل طولاً محدداً؟
-        const dimInput = document.getElementById('crb-wall-length-input');
-        const inputVal = parseFloat(dimInput?.value);
-        if (!isNaN(inputVal) && inputVal > 10 && crbState.frozenDir) {
-            finalPos = crbApplyFrozenDim(inputVal / 100);
-            dimInput.value = '';
-            crbState.frozenDir = null;
-        } else if (!isNaN(inputVal) && inputVal > 10) {
-            // لا يوجد تجميد — نستخدم الاتجاه الحالي للمؤشر
-            const last = crbState.points[crbState.points.length - 1];
-            const lenM = inputVal / 100;
-            const dx = raw.x - last.x;
-            const dz = raw.z - last.z;
-            if (Math.abs(dx) >= Math.abs(dz)) {
-                finalPos = { x: last.x + Math.sign(dx || 1) * lenM, z: last.z };
-            } else {
-                finalPos = { x: last.x, z: last.z + Math.sign(dz || 1) * lenM };
-            }
-            dimInput.value = '';
-        } else {
-            finalPos = crbConstrain(raw.x, raw.z);
+        finalPos = crbConstrain(raw.x, raw.z);
+        const last = crbState.points[crbState.points.length - 1];
+        if (Math.hypot(finalPos.x - last.x, finalPos.z - last.z) < 0.005) {
+            return false;
         }
     }
 
     crbState.points.push(finalPos);
-    crbState.frozenDir = null; // مسح التجميد بعد وضع النقطة
+    crbState.frozenDir = null;
+    clearCRBLengthInput();
+    updateCRBLengthPlaceholder();
     drawCRB();
+    return true;
 }
 
-// --- معالج الحركة ---
+function applyLengthToLastSegment(lenCm) {
+    if (crbState.points.length < 2 || crbState.isComplete) return false;
+    const lastIndex = crbState.points.length - 1;
+    const start = crbState.points[lastIndex - 1];
+    const end = crbState.points[lastIndex];
+    const lenM = lenCm / 100;
+    const dx = end.x - start.x;
+    const dz = end.z - start.z;
+    let nextEnd;
+
+    if (Math.abs(dx) >= Math.abs(dz)) {
+        nextEnd = crbSnapGrid(start.x + (Math.sign(dx) || 1) * lenM, start.z);
+    } else {
+        nextEnd = crbSnapGrid(start.x, start.z + (Math.sign(dz) || 1) * lenM);
+    }
+
+    if (Math.hypot(nextEnd.x - start.x, nextEnd.z - start.z) < 0.005) {
+        return false;
+    }
+
+    crbState.points[lastIndex] = nextEnd;
+    crbState.mouseX = nextEnd.x;
+    crbState.mouseZ = nextEnd.z;
+    crbState.snapToStart = false;
+    clearCRBLengthInput(`${Math.round(lenCm)} سم`);
+    drawCRB();
+    return true;
+}
+
+/**
+ * وضع النقطة الثانية بالطول (متر) من أول نثبتة، على محور 90° حسب اتجاه المؤشر.
+ * يسمح بإنهاء "أول جدار" بالمتر دون الضغط مرة أخرى — كالآلية المطلوبة عند "بَدء الضلع الثاني".
+ */
+function applyLengthInProgressFirstWall(lenCm) {
+    if (crbState.points.length !== 1 || crbState.isComplete) return false;
+    const p0 = crbState.points[0];
+    const lenM = lenCm / 100;
+    const dx = crbState.mouseX - p0.x;
+    const dz = crbState.mouseZ - p0.z;
+    if (Math.hypot(dx, dz) < 1e-4) return false;
+    let p1;
+    if (Math.abs(dx) >= Math.abs(dz)) {
+        p1 = crbSnapGrid(p0.x + (Math.sign(dx) || 1) * lenM, p0.z);
+    } else {
+        p1 = crbSnapGrid(p0.x, p0.z + (Math.sign(dz) || 1) * lenM);
+    }
+    if (Math.hypot(p1.x - p0.x, p1.z - p0.z) < 0.005) return false;
+    crbState.points.push(p1);
+    crbState.frozenDir = null;
+    crbState.snapToStart = false;
+    clearCRBLengthInput();
+    updateCRBLengthPlaceholder();
+    drawCRB();
+    return true;
+}
+
+/**
+ * تعديل طول الضلع من P0 → P1 فقط (أول جدار) مع سحب باقي النقاط بذات الإزاحة
+ * (يُبقي زوايا 90° والأشكال النسبية). مفيد عند 3+ نقاط حين يريد المستخدم "الجدار من البداية" وليس آخر جدار.
+ */
+function applyLengthToFirstWallWithTailTranslate(lenCm) {
+    if (crbState.points.length < 2 || crbState.isComplete) return false;
+    const p0 = crbState.points[0];
+    const p1 = crbState.points[1];
+    const lenM = lenCm / 100;
+    const dx0 = p1.x - p0.x;
+    const dz0 = p1.z - p0.z;
+    if (Math.hypot(dx0, dz0) < 0.005) return false;
+    let nextP1;
+    if (Math.abs(dx0) >= Math.abs(dz0)) {
+        nextP1 = crbSnapGrid(p0.x + (Math.sign(dx0) || 1) * lenM, p0.z);
+    } else {
+        nextP1 = crbSnapGrid(p0.x, p0.z + (Math.sign(dz0) || 1) * lenM);
+    }
+    if (Math.hypot(nextP1.x - p0.x, nextP1.z - p0.z) < 0.005) return false;
+    const tx = nextP1.x - p1.x;
+    const tz = nextP1.z - p1.z;
+    for (let i = 1; i < crbState.points.length; i++) {
+        const p = crbState.points[i];
+        crbState.points[i] = crbSnapGrid(p.x + tx, p.z + tz);
+    }
+    const last = crbState.points[crbState.points.length - 1];
+    crbState.mouseX = last.x;
+    crbState.mouseZ = last.z;
+    crbState.snapToStart = false;
+    clearCRBLengthInput(`${Math.round(lenCm)} سم`);
+    updateCRBLengthPlaceholder();
+    drawCRB();
+    return true;
+}
+
+function onCRBPointerDown(e) {
+    if (e.pointerType === 'touch') {
+        updateCRBTouchPoint(e);
+        if (crbState.touchPoints.size >= 2) {
+            beginCRBPinchZoom();
+            return;
+        }
+    }
+
+    if (crbState.isComplete || !e.isPrimary) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+    crbState.pointerDown = true;
+    crbState.pointerMoved = false;
+    crbState.activePointerId = e.pointerId;
+    crbState.pointerDownClientX = e.clientX;
+    crbState.pointerDownClientY = e.clientY;
+    crbState.canvas?.setPointerCapture?.(e.pointerId);
+    onCRBMove(e);
+
+    if (e.pointerType === 'touch' && crbState.points.length === 0) {
+        const { x: px, y: py } = getCRBEventPos(e);
+        const raw = crbPxToWorld(px, py);
+        if (commitCurrentCorner(raw)) {
+            crbState.lastCommitAt = performance.now();
+        }
+    }
+}
+
+function onCRBPointerMove(e) {
+    if (e.pointerType === 'touch') {
+        updateCRBTouchPoint(e);
+        if (crbState.isPinchZooming) {
+            updateCRBPinchZoom();
+            return;
+        }
+    }
+
+    if (!e.isPrimary) return;
+    if (crbState.pointerDown && crbState.activePointerId === e.pointerId) {
+        const movedPx = Math.hypot(e.clientX - crbState.pointerDownClientX, e.clientY - crbState.pointerDownClientY);
+        crbState.pointerMoved = movedPx > 6;
+    }
+    onCRBMove(e);
+}
+
+function onCRBPointerUp(e) {
+    if (e.pointerType === 'touch') {
+        removeCRBTouchPoint(e.pointerId);
+        if (crbState.isPinchZooming) {
+            if (crbState.touchPoints.size < 2) stopCRBPinchZoom();
+            onCRBPointerCancel(e);
+            return;
+        }
+    }
+
+    if (!e.isPrimary) return;
+    if (!crbState.pointerDown || crbState.activePointerId !== e.pointerId) return;
+
+    onCRBMove(e);
+
+    const now = performance.now();
+    const isPrimaryAction = e.pointerType !== 'mouse' || e.button === 0;
+    if (isPrimaryAction && !crbState.isPanning && now - crbState.lastCommitAt > 120) {
+        const { x: px, y: py } = getCRBEventPos(e);
+        const raw = crbPxToWorld(px, py);
+        if (commitCurrentCorner(raw)) {
+            crbState.lastCommitAt = now;
+        }
+    }
+
+    onCRBPointerCancel(e);
+}
+
+function onCRBPointerCancel(e) {
+    if (e?.pointerType === 'touch') {
+        removeCRBTouchPoint(e.pointerId);
+        if (crbState.touchPoints.size < 2) stopCRBPinchZoom();
+    }
+    if (e?.pointerId !== undefined) {
+        crbState.canvas?.releasePointerCapture?.(e.pointerId);
+    }
+    crbState.pointerDown = false;
+    crbState.pointerMoved = false;
+    crbState.activePointerId = null;
+}
+
 function onCRBMove(e) {
     if (crbState.isPanning) return;
+    if (crbState.isPinchZooming) return;
     if (crbState.isComplete) return;
-
-    // لا نغيّر الاتجاه عندما يكون حقل الإدخال نشطاً
-    const dimInput = document.getElementById('crb-wall-length-input');
-    if (document.activeElement === dimInput) return;
 
     const { x: px, y: py } = getCRBEventPos(e);
     const raw = crbPxToWorld(px, py);
     const constrained = crbConstrain(raw.x, raw.z);
 
-    // التحقق من قرب نقطة البداية على الموضع الخام
     crbState.snapToStart = (crbState.points.length >= 3) && crbNearStart(raw.x, raw.z);
 
     if (crbState.snapToStart) {
@@ -2882,27 +3180,10 @@ function onCRBMove(e) {
         crbState.mouseZ = constrained.z;
     }
 
-    // تحديث placeholder بالطول الحالي
-    if (crbState.points.length >= 1) {
-        const last = crbState.points[crbState.points.length - 1];
-        const lenCm = Math.round(Math.hypot(crbState.mouseX - last.x, crbState.mouseZ - last.z) * 100);
-        if (dimInput) dimInput.placeholder = lenCm + ' سم';
-    }
-
+    updateCRBLengthPlaceholder();
     drawCRB();
 }
 
-// --- تعامل اللمس ---
-function onCRBTouchStart(e) {
-    e.preventDefault();
-    onCRBClick({ button: 0, clientX: e.touches[0].clientX, clientY: e.touches[0].clientY, touches: e.touches });
-}
-function onCRBTouchMove(e) {
-    e.preventDefault();
-    onCRBMove({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY, touches: e.touches });
-}
-
-// --- التكبير والتحريك ---
 function onCRBWheel(e) {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.12 : 0.89;
@@ -2910,7 +3191,6 @@ function onCRBWheel(e) {
     drawCRB();
 }
 
-// --- إغلاق المضلع مع ضمان زوايا 90° ---
 function crbClose() {
     if (crbState.points.length < 3) return;
 
@@ -2920,21 +3200,16 @@ function crbClose() {
     const last = crbState.points[lastIndex];
     const prev = crbState.points[lastIndex - 1];
 
-    // أول جدار هو المرجع الثابت: لا نغيّر نقطة البداية ولا طول أول حائط عند الإغلاق.
     const firstIsHorizontal = Math.abs(second.x - first.x) >= Math.abs(second.z - first.z);
     const lastIsHorizontal = Math.abs(last.x - prev.x) >= Math.abs(last.z - prev.z);
 
-    // نقطة ما قبل الإغلاق يجب أن تقع على خط البداية العمودي/الأفقي المناسب،
-    // حتى يبقى جدار الإغلاق بزاوية 90° والجدار الموازي للأول هو الذي يتعدل.
     const closureAnchor = firstIsHorizontal
         ? crbSnapGrid(first.x, last.z)
         : crbSnapGrid(last.x, first.z);
 
     if (lastIsHorizontal === firstIsHorizontal) {
-        // يوجد بالفعل جدار موازي للأول، فنعدّل طوله فقط بدل إضافة جدار جديد.
         crbState.points[lastIndex] = closureAnchor;
     } else {
-        // المستخدم رسم حتى الزاوية السابقة فقط، فننشئ الجدار المقابل تلقائياً.
         const sameAsLast = Math.hypot(closureAnchor.x - last.x, closureAnchor.z - last.z) < 0.005;
         if (!sameAsLast) {
             crbState.points.push(closureAnchor);
@@ -2942,17 +3217,10 @@ function crbClose() {
     }
 
     crbState.isComplete = true;
-    const startBtn = document.getElementById('crb-start-btn');
-    if (startBtn) {
-        startBtn.disabled = false;
-        startBtn.style.opacity = '1';
-        startBtn.style.cursor  = 'pointer';
-    }
+    setCRBStartButtonEnabled(true);
+    clearCRBLengthInput('تم إغلاق الشكل');
     drawCRB();
 }
-
-// --- تهيئة اللوحة ---
-
 
 function crbResizeCanvas() {
     const canvas = crbState.canvas;
@@ -2961,9 +3229,6 @@ function crbResizeCanvas() {
     if (!wrapper) return;
     const dpr = window.devicePixelRatio || 1;
 
-    // The overlay is always position:fixed covering the full viewport, so
-    // window.innerWidth/Height are reliable fallbacks. Never loop with RAF
-    // when dimensions are 0 — that causes an infinite loop and browser freeze.
     const W = wrapper.clientWidth  || window.innerWidth;
     const H = wrapper.clientHeight || window.innerHeight;
 
@@ -2986,25 +3251,20 @@ function openCustomRoomBuilder(e) {
     const overlay = document.getElementById('custom-room-overlay');
     if (!overlay) return;
 
-    // Hide the setup panel
     const setupPanel = document.getElementById('setup-panel');
     if (setupPanel) setupPanel.style.display = 'none';
 
-    // Sync room height from the setup panel input
     const mainH = parseFloat(document.getElementById('roomHeight')?.value) || 280;
     const crbH  = document.getElementById('crb-height');
     if (crbH) crbH.value = mainH;
 
-    // Show the overlay — the CSS file already handles position:fixed, inset:0,
-    // background, z-index, and flex-direction. We only need to flip display.
     overlay.style.display = 'flex';
 
+    resetCustomRoomBuilderState();
     crbState.scale   = 100;
     crbState.offsetX = 0;
     crbState.offsetZ = 0;
 
-    // Two nested rAFs guarantee the browser has fully laid out and painted the
-    // overlay before we read clientWidth/clientHeight inside initCRB.
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             initCRB();
@@ -3017,30 +3277,52 @@ function closeCustomRoomBuilder() {
     if (overlay) overlay.style.display = 'none';
 
     const setupPanel = document.getElementById('setup-panel');
-    if (setupPanel) setupPanel.style.display = 'flex'; 
+    if (setupPanel) setupPanel.style.display = 'flex';
+
+    resetCustomRoomBuilderState();
+}
+
+function resetCustomRoomBuilderState() {
+    crbState.points = [];
+    crbState.isComplete = false;
+    crbState.mouseX = 0;
+    crbState.mouseZ = 0;
+    crbState.snapToStart = false;
+    crbState.frozenDir = null;
+    crbState.touchStarted = false;
+    crbState.touchMoved = false;
+    crbState.pointerDown = false;
+    crbState.pointerMoved = false;
+    crbState.activePointerId = null;
+    crbState.lastCommitAt = 0;
+    crbState.touchPoints.clear();
+    crbState.isPinchZooming = false;
+    crbState.pinchStartDistance = 0;
+    crbState.pinchStartScale = crbState.scale;
+    crbState.pinchAnchorWorld = null;
+    clearCRBLengthInput('ثبت أول ضلع');
+    setCRBStartButtonEnabled(false);
 }
 
 function initCRB() {
-    // ✨ تم تصحيح الـ ID إلى الكانفاس الحقيقي
     crbState.canvas = document.getElementById('crb-canvas');
     if (!crbState.canvas) return;
+    crbState.canvas.tabIndex = 0;
 
     crbState.ctx = crbState.canvas.getContext('2d');
 
-    // تنظيف الأحداث لتجنب التكرار
-    crbState.canvas.removeEventListener('mousedown', onCRBClick);
-    crbState.canvas.removeEventListener('mousemove', onCRBMove);
-    crbState.canvas.removeEventListener('touchstart', onCRBTouchStart);
-    crbState.canvas.removeEventListener('touchmove', onCRBTouchMove);
+    crbState.canvas.removeEventListener('pointerdown', onCRBPointerDown);
+    crbState.canvas.removeEventListener('pointermove', onCRBPointerMove);
+    crbState.canvas.removeEventListener('pointerup', onCRBPointerUp);
+    crbState.canvas.removeEventListener('pointercancel', onCRBPointerCancel);
     crbState.canvas.removeEventListener('wheel', onCRBWheel);
 
-    crbState.canvas.addEventListener('mousedown', onCRBClick);
-    crbState.canvas.addEventListener('mousemove', onCRBMove);
-    crbState.canvas.addEventListener('touchstart', onCRBTouchStart, { passive: false });
-    crbState.canvas.addEventListener('touchmove', onCRBTouchMove,  { passive: false });
+    crbState.canvas.addEventListener('pointerdown', onCRBPointerDown);
+    crbState.canvas.addEventListener('pointermove', onCRBPointerMove);
+    crbState.canvas.addEventListener('pointerup', onCRBPointerUp);
+    crbState.canvas.addEventListener('pointercancel', onCRBPointerCancel);
     crbState.canvas.addEventListener('wheel', onCRBWheel, { passive: false });
 
-    // سحب الزر الأوسط للتحريك — استخدام دوال مسماة لتجنب التراكم عند استدعاء initCRB مرات متعددة
     if (crbState._onPanMouseDown) {
         crbState.canvas.removeEventListener('mousedown', crbState._onPanMouseDown);
         window.removeEventListener('mousemove', crbState._onPanMouseMove);
@@ -3070,12 +3352,6 @@ function initCRB() {
     crbResizeCanvas();
 }
 
-
-
-
-
-// --- أزرار لوحة CRB ---
-// --- تطبيق الطول المُدخل يدوياً مع الاتجاه المُجمَّد ---
 function crbApplyFrozenDim(lenM) {
     const fd = crbState.frozenDir;
     if (!fd || crbState.points.length === 0) return null;
@@ -3087,89 +3363,79 @@ function crbApplyFrozenDim(lenM) {
     }
 }
 
-// --- إدخال يدوي للطول مع تجميد الاتجاه ---
+function crbFocusLengthInput() {
+    const dimInput = getCRBDimInput();
+    if (!dimInput || crbState.isComplete || crbState.points.length < 1) return;
+    const currentLenCm = getCRBLengthValueCmForField();
+    if (currentLenCm && !dimInput.value) dimInput.value = String(currentLenCm);
+    dimInput.focus();
+    dimInput.select?.();
+}
+
 (function setupDimInput() {
-    const dimInput = document.getElementById('crb-wall-length-input');
+    const dimInput = getCRBDimInput();
+    const quickBtn = document.getElementById('crb-length-focus-btn');
     if (!dimInput) return;
 
-    // تجميد الاتجاه عند التركيز على الـ input
     dimInput.addEventListener('focus', () => {
-        if (crbState.points.length >= 1) {
-            const last = crbState.points[crbState.points.length - 1];
-            const dx = crbState.mouseX - last.x;
-            const dz = crbState.mouseZ - last.z;
-            const isH = Math.abs(dx) >= Math.abs(dz);
-            crbState.frozenDir = {
-                isHorizontal: isH,
-                signX: Math.sign(dx) || 1,
-                signZ: Math.sign(dz) || 1,
-            };
-        }
+        if (crbState.points.length < 1 || crbState.isComplete) return;
+        const currentLenCm = getCRBLengthValueCmForField();
+        if (currentLenCm && !dimInput.value) dimInput.value = String(currentLenCm);
+        dimInput.select?.();
     });
 
-    // Enter لتطبيق الطول وإضافة النقطة فوراً
     dimInput.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter') return;
         e.preventDefault();
         const val = parseFloat(dimInput.value);
-        if (isNaN(val) || val <= 10 || crbState.points.length === 0 || crbState.isComplete) return;
+        if (isNaN(val) || val <= 10 || crbState.isComplete) return;
+        if (crbState.points.length < 1) return;
 
-        const lenM = val / 100;
-        let finalPos;
-        if (crbState.frozenDir) {
-            finalPos = crbApplyFrozenDim(lenM);
+        let ok = false;
+        if (crbState.points.length === 1) {
+            ok = applyLengthInProgressFirstWall(val);
+        } else if (e.shiftKey) {
+            ok = applyLengthToFirstWallWithTailTranslate(val);
         } else {
-            const last = crbState.points[crbState.points.length - 1];
-            const dx   = crbState.mouseX - last.x;
-            const dz   = crbState.mouseZ - last.z;
-            if (Math.abs(dx) >= Math.abs(dz)) {
-                finalPos = crbSnapGrid(last.x + Math.sign(dx || 1) * lenM, last.z);
-            } else {
-                finalPos = crbSnapGrid(last.x, last.z + Math.sign(dz || 1) * lenM);
-            }
+            ok = applyLengthToLastSegment(val);
         }
 
-        if (finalPos) {
-            crbState.points.push(finalPos);
-            dimInput.value = '';
-            crbState.frozenDir = null;
-            drawCRB();
-        }
-        // أعد التركيز للـ canvas
+        if (ok) dimInput.blur();
         crbState.canvas?.focus?.();
     });
 
-    // مسح التجميد عند الخروج من الـ input بدون Enter
+    dimInput.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        dimInput.blur();
+        crbState.canvas?.focus?.();
+    });
+
     dimInput.addEventListener('blur', () => {
-        // نبقي frozenDir حتى النقر التالي على الـ canvas
+        updateCRBLengthPlaceholder();
+    });
+
+    quickBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        crbFocusLengthInput();
     });
 })();
 
 document.getElementById('crb-undo-btn')?.addEventListener('click', () => {
     crbState.frozenDir = null;
-    const dimInput = document.getElementById('crb-wall-length-input');
-    if (dimInput) dimInput.value = '';
+    clearCRBLengthInput();
     if (crbState.isComplete) {
         crbState.isComplete = false;
-        const startBtn = document.getElementById('crb-start-btn');
-        if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; startBtn.style.cursor = 'not-allowed'; }
+        setCRBStartButtonEnabled(false);
     } else if (crbState.points.length > 0) {
         crbState.points.pop();
     }
+    updateCRBLengthPlaceholder();
     drawCRB();
 });
 
 document.getElementById('crb-clear-btn')?.addEventListener('click', () => {
-    crbState.points      = [];
-    crbState.isComplete  = false;
-    crbState.mouseX      = 0;
-    crbState.mouseZ      = 0;
-    crbState.snapToStart = false;
-    crbState.frozenDir   = null;
-    const dimInput = document.getElementById('crb-wall-length-input');
-    if (dimInput) { dimInput.value = ''; dimInput.placeholder = 'تلقائي'; }
-    const startBtn = document.getElementById('crb-start-btn');
-    if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; startBtn.style.cursor = 'not-allowed'; }
+    resetCustomRoomBuilderState();
     drawCRB();
 });
 
@@ -3181,7 +3447,19 @@ document.getElementById('crb-start-btn')?.addEventListener('click', () => {
     startCustomDesign();
 });
 
-// ضبط حجم اللوحة عند تغيير حجم النافذة
+document.addEventListener('keydown', (e) => {
+    const overlay = document.getElementById('custom-room-overlay');
+    const dimInput = getCRBDimInput();
+    const overlayOpen = overlay && overlay.style.display === 'flex';
+    if (!overlayOpen || crbState.isComplete || crbState.points.length < 1) return;
+    if (document.activeElement === dimInput) return;
+
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        crbFocusLengthInput();
+    }
+});
+
 window.addEventListener('resize', () => {
     const overlay = document.getElementById('custom-room-overlay');
     if (overlay && overlay.style.display === 'flex') {
