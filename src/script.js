@@ -33,6 +33,7 @@ import {
     receptionCabinets,
     electricalAppliances,
     accessoriesList,
+    getWallAlignYawOffsetForPath,
 } from './glb-models-data.js';
 import { setupScene } from './scene-setup.js';
 import { init2DBlueprint } from './blueprint-2d.js';
@@ -251,13 +252,6 @@ const wallColorButtons = document.querySelectorAll('#wall-color-buttons .color-b
 const floorCabinetTextureButtons = document.querySelectorAll('#floor-cabinet-texture-buttons .texture-button');
 const attachedCabinetTextureButtons = document.querySelectorAll('#attached-cabinet-texture-buttons .texture-button');
 const doubleAttachedCabinetTextureButtons = document.querySelectorAll('#double-attached-cabinet-texture-buttons .texture-button');
-
-// --- Reporting ---
-const reportBtn = document.getElementById('reportBtn');
-const reportModal = document.getElementById('report-modal');
-const closeReportSpan = document.querySelector('.close-report');
-const reportBody = document.getElementById('report-body');
-const printReportBtn = document.getElementById('printReportBtn');
 
 
 
@@ -771,11 +765,23 @@ function isCabinet(object) {
     );
 }
 
-/** رسبشن (static/resption/): نفس خامة ولون الفاترينات الأرضية على مادة ground وليس ملحق up */
+/** resption/ أو appliancese_vatrena/: تثبيت أرضي + attached-cabinet + نسيج فاترينة (أرض) */
+function isReceptionStyleModelPath(p) {
+    const s = (p || '').toString().split('?')[0];
+    return s.includes('resption/') || s.includes('appliancese_vatrena/');
+}
+
+/** resption/ فقط: الموديلات مُصمّمة بمحور مختلف (قلب 180° + +90° بعد المحاذاة) — أجهزة appliancese_vatrena تتبع دوران الفاترينات العادي */
+function isResptionFolderModelPath(p) {
+    const s = (p || '').toString().split('?')[0];
+    return s.includes('resption/');
+}
+
+/** رسبشن والأجهزة المعلقة: نفس خامة ولون الفاترينات الأرضية على مادة ground وليس ملحق up */
 function isReceptionCabinetGroup(object) {
     if (!object || object.name !== 'attached-cabinet') return false;
     const p = (object.userData?.modelPath || '').toString().split('?')[0];
-    return p.includes('resption/');
+    return isReceptionStyleModelPath(p);
 }
 
 function cabinetBodyMaterialSlot(object) {
@@ -1315,10 +1321,18 @@ function autoAlignToNearestWall(object, forceInitialRotation = false) {
                 object.rotation.y = closestWall.position.z > 0 ? Math.PI : 0;
             }
         }
-        // رسبشن (resption): الموديلات مصممة بمحور مختلف عن الفاترينات — +90° حتى يلاصق الظهر الحائط وليس الجانب
+        // resption/ فقط: تصحيح +90° — أجهزة appliancese_vatrena مثل باقي الفاترينات (بدون هذه الزيادة)
         const alignPath = (object.userData?.modelPath || '').toString();
-        if (alignPath.includes('resption/')) {
+        if (isResptionFolderModelPath(alignPath)) {
             object.rotation.y += Math.PI / 2;
+        }
+        // إكسسوارات/موديلات بمحور أمامي غير اعتيادي (مثل chair.glb)
+        let yawExtra = object.userData?.wallAlignYawOffset;
+        if (typeof yawExtra !== 'number' || !Number.isFinite(yawExtra)) {
+            yawExtra = getWallAlignYawOffsetForPath(alignPath);
+        }
+        if (yawExtra) {
+            object.rotation.y += yawExtra;
         }
     }
 }
@@ -1346,14 +1360,13 @@ function populateModelList(listElementId, modelsArray) {
         li.appendChild(span);
         listElement.appendChild(li);
         
-        const isDoubleAttached = listElementId === 'electricalAppliancesList';
-      // تمرير الـ customY عند الضغط مع فحص الزائر
+      // تمرير الـ customY عند الضغط مع فحص الزائر (قسم الأجهزة مثل الرسبشن: attached، ليس double-attached)
         li.addEventListener('click', () => {
             if (window.isGuestUser) {
                 document.getElementById('guestRestrictedModal').style.display = 'flex';
                 return;
             }
-            addCabinetToScene(model.path, isDoubleAttached, model.customY);
+            addCabinetToScene(model.path, false, model.customY);
         });
         
     });
@@ -1577,9 +1590,10 @@ if (queryParams) {
                         node.receiveShadow = true;
                     }
                 });
-            const isAttached = modelPath.includes('resption/');
-            // موديلات الرسبشن: قلب الـ mesh 180° حول Y قبل التوسيط ثم نفس autoAlign للفاترينات (علم للحفظ/التحميل)
-            if (isAttached) {
+            const isWallAttachedStyle = isReceptionStyleModelPath(modelPath);
+            const isResptionMeshTweak = isResptionFolderModelPath(modelPath);
+            // resption/ فقط: قلب الـ mesh 180° — الأجهزة بنفس محور GLB الاعتيادي للفاترينات
+            if (isResptionMeshTweak) {
                 newModel.rotation.y = Math.PI;
             }
             const box = new THREE.Box3().setFromObject(newModel);
@@ -1596,8 +1610,8 @@ if (queryParams) {
                 cabinetY = customY;
             } else if (isDoubleAttached) { 
                 cabinetY = 2.22; 
-            } else if (isAttached) {
-                // رسبشن (resption/): على الأرض مثل الفاترينات الأرضية، لا على ارتفاع 1.5م
+            } else if (isWallAttachedStyle) {
+                // resption/ + appliancese_vatrena/: على الأرض
                 cabinetY = 0;
             } else if (isPantry) { 
                 cabinetY = 0; 
@@ -1614,16 +1628,16 @@ if (queryParams) {
             } else if (isAppliance) {
                 group.name = 'appliance'; // ⚡ تسمية خاصة للأجهزة
             } else { 
-                group.name = isAttached ? 'attached-cabinet' : (isPantry ? 'pantry-cabinet' : 'floor-cabinet'); 
+                group.name = isWallAttachedStyle ? 'attached-cabinet' : (isPantry ? 'pantry-cabinet' : 'floor-cabinet'); 
             }
             const size = box.getSize(new THREE.Vector3());
             group.userData.originalDimensions = { width: Math.round(size.x * 100), depth: Math.round(size.z * 100), height: Math.round(size.y * 100) };
             group.userData.modelPath = modelPath;
-            if (isAttached) {
+            if (isResptionMeshTweak) {
                 group.userData.receptionMeshYawPI = true;
             }
             if (isDoubleAttached && currentDoubleAttachedCabinetTexture) { applyTextureToMaterial(group, 'up', currentDoubleAttachedCabinetTexture); }
-            else if (isAttached && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
+            else if (isWallAttachedStyle && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
             else if ((group.name === 'floor-cabinet' || group.name === 'pantry-cabinet') && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
             autoAlignToNearestWall(group, true);
             
@@ -2411,8 +2425,9 @@ if (!('ontouchstart' in window)) {
             const modelPath = targetItem.dataset.modelPath;
             const parentListId = targetItem.closest('ul')?.id;
             let cabinetType = 'floor-cabinet';
-            if (parentListId === 'receptionCabinetsList') { cabinetType = 'attached-cabinet'; }
-            else if (parentListId === 'electricalAppliancesList') { cabinetType = 'double-attached-cabinet'; }
+            if (parentListId === 'receptionCabinetsList' || parentListId === 'electricalAppliancesList') {
+                cabinetType = 'attached-cabinet';
+            }
           const dragData = { 
                 path: modelPath, 
                 type: cabinetType,
@@ -2459,7 +2474,7 @@ if (queryParams) {
                 const intersects = raycaster.intersectObjects([floor], true);
                 const group = new THREE.Group();
                 group.add(newModel);
-                if (cabinetType === 'attached-cabinet') {
+                if (cabinetType === 'attached-cabinet' && isResptionFolderModelPath(droppedModelPath)) {
                     newModel.rotation.y = Math.PI;
                 }
                 const box = new THREE.Box3().setFromObject(newModel);
@@ -2495,11 +2510,11 @@ if (queryParams) {
                 const size = box.getSize(new THREE.Vector3());
                 group.userData.originalDimensions = { width: Math.round(size.x * 100), depth: Math.round(size.z * 100), height: Math.round(size.y * 100) };
                 group.userData.modelPath = droppedModelPath;
-                if (cabinetType === 'attached-cabinet') {
+                if (cabinetType === 'attached-cabinet' && isResptionFolderModelPath(droppedModelPath)) {
                     group.userData.receptionMeshYawPI = true;
                 }
                 if (group.name === 'double-attached-cabinet' && currentDoubleAttachedCabinetTexture) { applyTextureToMaterial(group, 'up', currentDoubleAttachedCabinetTexture); }
-                else if (group.name === 'attached-cabinet' && droppedModelPath.includes('resption/') && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
+                else if (group.name === 'attached-cabinet' && isReceptionStyleModelPath(droppedModelPath) && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
                 else if (group.name === 'attached-cabinet' && currentAttachedCabinetTexture) { applyTextureToMaterial(group, 'up', currentAttachedCabinetTexture); }
                 else if ((group.name === 'floor-cabinet' || group.name === 'pantry-cabinet') && currentFloorCabinetTexture) { applyTextureToMaterial(group, 'ground', currentFloorCabinetTexture); }
                 autoAlignToNearestWall(group, true);
@@ -3647,9 +3662,11 @@ if (queryParams) secureModelUrl += '&' + queryParams;
                 }
             });
             const pathRestore = (objectData.userData?.modelPath || objectData.modelPath || '').toString();
+            const pathCleanRestore = (pathRestore || '').toString();
             const flipReceptionMeshRestore = objectData.name === 'attached-cabinet' &&
                 objectData.userData?.receptionMeshYawPI !== false &&
-                (objectData.userData?.receptionMeshYawPI === true || pathRestore.includes('resption/'));
+                !pathCleanRestore.includes('appliancese_vatrena/') &&
+                (objectData.userData?.receptionMeshYawPI === true || isResptionFolderModelPath(pathRestore));
             if (flipReceptionMeshRestore) {
                 newModel.rotation.y = Math.PI;
             }
@@ -4118,9 +4135,10 @@ function applyCabinetDimensions() {
     // =========================================================
    const modelPath = cabinetBeingEdited.userData.modelPath || '';
     
-    // هذا الشرط راح يشمل أي ملف بداخل مجلد الأجهزة أو الاكسسوارات
-    const isApplianceOrAccessory = modelPath.includes('appliances/') || 
-                                   modelPath.includes('accessories_vatrena/');
+    // أي ملف بداخل مجلد الأجهزة/الأكسسوار — appliancese_vatrena نفس الاستثناء (بدونه يُفك التكبير حسب أسماء خامات الكابين ويخرب شكل الـ glb)
+    const isApplianceOrAccessory = modelPath.includes('appliances/') ||
+        modelPath.includes('appliancese_vatrena/') ||
+        modelPath.includes('accessories_vatrena/');
 
     const isStandaloneDoor = modelPath.includes('door.glb') || 
                              modelPath.includes('door1.glb') || 
@@ -4284,6 +4302,36 @@ cancelRoomDimensionsBtn?.addEventListener('click', hideRoomDimensionsPopup);
 const addBaseboardBtn = document.getElementById('addBaseboardBtn');
 const deleteBaseboardBtn = document.getElementById('deleteBaseboardBtn');
 
+/**
+ * AABB مدمج بمحور الـ object (يتجاهل الدوران الأب): يلائم موديلات glb
+ * التي مركز المش فيها لا يتطابق مع أصل الـ Group — لتمركّز الإزارة فعلياً على الفاترينة.
+ */
+function getObjectLocalAxisAlignedBounds(root) {
+    const box = new THREE.Box3();
+    if (!root) return box;
+    const inv = new THREE.Matrix4();
+    const corner = new THREE.Vector3();
+    root.updateMatrixWorld(true);
+    inv.copy(root.matrixWorld).invert();
+    root.traverse((c) => {
+        if (!c.isMesh) return;
+        if (!c.geometry) return;
+        if (!c.geometry.boundingBox) c.geometry.computeBoundingBox();
+        const b = c.geometry.boundingBox;
+        if (!b) return;
+        const m = c.matrixWorld;
+        for (const x of [b.min.x, b.max.x]) {
+            for (const y of [b.min.y, b.max.y]) {
+                for (const z of [b.min.z, b.max.z]) {
+                    corner.set(x, y, z).applyMatrix4(m).applyMatrix4(inv);
+                    box.expandByPoint(corner);
+                }
+            }
+        }
+    });
+    return box;
+}
+
 function autoGenerateBaseboards() {
     const oldBaseboards = scene.children.filter(c => c.name === 'baseboard');
     oldBaseboards.forEach(bb => {
@@ -4310,9 +4358,12 @@ function autoGenerateBaseboards() {
     let generatedCount = 0;
     const BB_HEIGHT = 0.10; 
     const BB_DEPTH = 0.40;
+    /** فاترينة وسط المحل: إزارة بمحاذاة عمق 70 سم (مركّزة عرضياً ومع zOffset النسبي للعمق) */
+    const MIDDLE_VATRENA_BASEBOARD_DEPTH_M = 0.7;
 
     floorCabs.forEach(cab => {
-        const path = (cab.userData.modelPath || '').toLowerCase();
+        const path = (cab.userData.modelPath || '').replace(/\\/g, '/').toLowerCase();
+        const isMiddleVatrenaCab = path.includes('middle vatrena/');
         
         let w = 0; let d = 0.60; 
         if (cab.userData.originalDimensions) {
@@ -4323,6 +4374,28 @@ function autoGenerateBaseboards() {
             const size = new THREE.Vector3(); 
             bbox.getSize(size);
             w = size.x; d = size.z;
+        }
+        /** إزاحة تمركيز الإزارة على المش الفعلي (فاترينة وسطى فقط) — أبعاد صندوق الإزارة من الـ AABB المحلي */
+        let plinthMeshOffset = new THREE.Vector3(0, 0, 0);
+        let middlePlinthGeoX = null;
+        let middlePlinthGeoZ = null;
+        if (isMiddleVatrenaCab) {
+            const localB = getObjectLocalAxisAlignedBounds(cab);
+            d = MIDDLE_VATRENA_BASEBOARD_DEPTH_M;
+            if (!localB.isEmpty()) {
+                const s = localB.getSize(new THREE.Vector3());
+                const c = localB.getCenter(new THREE.Vector3());
+                plinthMeshOffset.set(c.x, 0, c.z);
+                if (s.x >= s.z) {
+                    middlePlinthGeoX = s.x;
+                    middlePlinthGeoZ = MIDDLE_VATRENA_BASEBOARD_DEPTH_M;
+                    w = s.x;
+                } else {
+                    middlePlinthGeoX = MIDDLE_VATRENA_BASEBOARD_DEPTH_M;
+                    middlePlinthGeoZ = s.z;
+                    w = s.z;
+                }
+            }
         }
 
         const bbGroup = new THREE.Group();
@@ -4424,11 +4497,20 @@ function autoGenerateBaseboards() {
             bbGroup.add(innerGroup);
 
         } else {
-            const geom = new THREE.BoxGeometry(w, BB_HEIGHT, BB_DEPTH);
+            const useMiddleLocal = isMiddleVatrenaCab && middlePlinthGeoX != null;
+            const px = useMiddleLocal ? middlePlinthGeoX : w;
+            const pz = useMiddleLocal
+                ? middlePlinthGeoZ
+                : (isMiddleVatrenaCab ? MIDDLE_VATRENA_BASEBOARD_DEPTH_M : BB_DEPTH);
+            const geom = new THREE.BoxGeometry(px, BB_HEIGHT, pz);
             const material = new THREE.MeshStandardMaterial({ color: 0xcccccc }); material.name = 'ground';
             const mesh = new THREE.Mesh(geom, material); mesh.castShadow = true; mesh.receiveShadow = true;
-            const zOffset = (BB_DEPTH - d) / 2;
-            mesh.position.set(0, 0, zOffset); 
+            const zOffset = useMiddleLocal ? 0 : (pz - d) / 2;
+            mesh.position.set(
+                useMiddleLocal ? plinthMeshOffset.x : 0,
+                0,
+                (useMiddleLocal ? plinthMeshOffset.z : 0) + zOffset
+            );
             bbGroup.add(mesh);
         }
 
@@ -4730,91 +4812,7 @@ document.addEventListener('keydown', (e) => {
 saveImageBtn?.addEventListener('click', saveCanvasAsImage);
 
 /* =========================================================================
-   12. REPORTING SYSTEM
-   ========================================================================= */
-function generateReport() {
-    const categories = {
-        'floor-cabinet': { title: 'الخزائن الأرضية', items: [] },
-        'attached-cabinet': { title: 'الخزائن المعلقة', items: [] },
-        'double-attached-cabinet': { title: 'خزائن دبل ملحق', items: [] },
-        'pantry-cabinet': { title: 'الخزائن الكنتورية', items: [] }
-    };
-
-    scene.traverse((obj) => {
-        // نتحقق أولاً أن العنصر هو Group ومن التصنيفات المطلوبة
-        if (obj.isGroup && categories[obj.name]) {
-            
-            let isRealCabinet = false;
-
-            // فحص الأجسام داخل المجموعة للبحث عن خامة باسم ground أو up
-            obj.traverse((child) => {
-                if (child.isMesh && child.material) {
-                    const materials = Array.isArray(child.material) ? child.material : [child.material];
-                    materials.forEach(m => {
-                        const mName = (m.name || '').toLowerCase();
-                        // إذا كانت الخزانة أرضية نبحث عن ground، وإذا معلقة نبحث عن up
-                        if (mName.includes('ground') || mName.includes('up')) {
-                            isRealCabinet = true;
-                        }
-                    });
-                }
-            });
-
-            // إذا وجدنا الخامة المطلوبة، نعتبرها كابينة ونأخذ قياسها
-            if (isRealCabinet) {
-                let width = 0;
-                if (obj.userData && obj.userData.originalDimensions) {
-                    width = obj.userData.originalDimensions.width;
-                } else {
-                    const bbox = new THREE.Box3().setFromObject(obj);
-                    const size = bbox.getSize(new THREE.Vector3());
-                    width = Math.round(size.x * 100);
-                }
-                categories[obj.name].items.push(width);
-            }
-        }
-    });
-
-    // كود عرض النتائج في الـ Modal (يبقى كما هو)
-    let htmlContent = '';
-    let hasItems = false;
-    for (const [key, category] of Object.entries(categories)) {
-        if (category.items.length > 0) {
-            hasItems = true;
-            htmlContent += `
-                <div class="report-section">
-                    <h4>${category.title} (العدد: ${category.items.length})</h4>
-                    <ul class="report-list">
-                        ${category.items.map(w => `<li class="report-item">${w} سم</li>`).join('')}
-                    </ul>
-                </div>
-            `;
-        }
-    }
-    if (!hasItems) {
-        htmlContent = '<p style="text-align:center; padding:20px;">لا توجد كابينات في التصميم حالياً.</p>';
-    }
-    document.getElementById('report-body').innerHTML = htmlContent;
-}
-
-reportBtn?.addEventListener('click', () => { generateReport(); reportModal.style.display = "block"; });
-closeReportSpan?.addEventListener('click', () => { reportModal.style.display = "none"; });
-window.addEventListener('click', (event) => { if (event.target == reportModal) { reportModal.style.display = "none"; } });
-printReportBtn?.addEventListener('click', () => {
-    const printContent = document.getElementById('report-body').innerHTML;
-    const win = window.open('', '', 'height=700,width=700');
-    win.document.write('<html><head><title>تقرير الكابينات</title>');
-    win.document.write('<style>body{font-family: sans-serif; direction: rtl;} .report-list{display:flex; flex-wrap:wrap; gap:10px; list-style:none;} .report-item{border:1px solid #000; padding:5px; margin:2px;}</style>');
-    win.document.write('</head><body>');
-    win.document.write('<h2>تقرير قياسات الكابينات (العرض)</h2>');
-    win.document.write(printContent);
-    win.document.write('</body></html>');
-    win.document.close();
-    win.print();
-});
-
-/* =========================================================================
-   13. SAVE / LOAD SYSTEM
+   12. SAVE / LOAD SYSTEM
    ========================================================================= */
 function serializeScene() {
     const sceneData = {
@@ -5152,9 +5150,11 @@ if (queryParams) secureModelUrl += '&' + queryParams;
                     group.add(newModel);
                     group.name = obj.name;
                     const pathDeser = (obj.userData?.modelPath || '').toString();
+                    const pathCleanDeser = (pathDeser || '').toString();
                     const flipReceptionMeshDeser = obj.name === 'attached-cabinet' &&
                         obj.userData?.receptionMeshYawPI !== false &&
-                        (obj.userData?.receptionMeshYawPI === true || pathDeser.includes('resption/'));
+                        !pathCleanDeser.includes('appliancese_vatrena/') &&
+                        (obj.userData?.receptionMeshYawPI === true || isResptionFolderModelPath(pathDeser));
                     if (flipReceptionMeshDeser) {
                         newModel.rotation.y = Math.PI;
                     }
@@ -5387,7 +5387,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* =========================================================================
-   14. ANIMATION LOOP
+   13. ANIMATION LOOP
    ========================================================================= */
 function updateFloatingToolbarPosition() {
     // 1. التحقق من وجود عنصر محدد

@@ -975,9 +975,7 @@ input:checked + .slider:before {
     border-radius: 50%;
 }
 
-/* =========================================
-   Report Modal
-   ========================================= */
+/* نافذة منبثقة مشتركة (مثلاً فيديو تعليمي — تستخدم report-modal / report-content) */
 .report-modal {
     display: none;
     position: fixed;
@@ -1016,65 +1014,6 @@ input:checked + .slider:before {
     color: #009688;
     margin: 0;
 }
-
-.close-report {
-    color: #aaa;
-    font-size: 28px;
-    font-weight: bold;
-    cursor: pointer;
-}
-
-.close-report:hover,
-.close-report:focus {
-    color: black;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-.report-section {
-    margin-bottom: 20px;
-}
-
-.report-section h4 {
-    background-color: #f1f1f1;
-    padding: 8px;
-    border-right: 4px solid #009688;
-    margin-bottom: 10px;
-}
-
-.report-list {
-    list-style: none;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.report-item {
-    background: #fff;
-    border: 1px solid #ddd;
-    padding: 5px 10px;
-    border-radius: 4px;
-    font-weight: bold;
-    font-size: 0.9rem;
-}
-
-.print-btn {
-    background-color: #2196F3;
-    color: white;
-    padding: 10px 20px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    width: 100%;
-    margin-top: 10px;
-    font-size: 1rem;
-}
-
-.print-btn:hover {
-    background-color: #0b7dda;
-}
-
 
 /* تنسيق السطر الواحد داخل الصندوق */
 .toggle-row {
@@ -1952,7 +1891,6 @@ body::before {
 #eduVideoBtn,
 #saveImageBtn,
 #renderBtn,
-#reportBtn,
 #toggleSketchBtn,
 #saveDesignBtn,
 #refreshDesignsListBtn,
@@ -2234,8 +2172,7 @@ body::before {
 #apply-room-dimensions,
 #saveDesignBtn,
 #saveImageBtn,
-#renderBtn,
-#reportBtn {
+#renderBtn {
     background: linear-gradient(135deg, var(--vatrena-teal) 0%, #117a74 100%) !important;
     color: #fff !important;
 }
@@ -2244,8 +2181,7 @@ body::before {
 #apply-room-dimensions:hover,
 #saveDesignBtn:hover,
 #saveImageBtn:hover,
-#renderBtn:hover,
-#reportBtn:hover {
+#renderBtn:hover {
     background: linear-gradient(135deg, #29cab8 0%, #16948d 100%) !important;
 }
 
@@ -2430,17 +2366,6 @@ body::before {
 
 #renderBtn:hover {
     background: linear-gradient(135deg, #ff7d72 0%, #ec5845 100%) !important;
-    transform: translateY(-2px);
-}
-
-#reportBtn {
-    background: linear-gradient(135deg, #23c6b1 0%, #138a7e 100%) !important;
-    color: #fff !important;
-    box-shadow: 0 14px 26px rgba(19, 138, 126, 0.26) !important;
-}
-
-#reportBtn:hover {
-    background: linear-gradient(135deg, #31d7c1 0%, #16998d 100%) !important;
     transform: translateY(-2px);
 }
 
