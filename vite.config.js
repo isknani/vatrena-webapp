@@ -30,9 +30,11 @@ export default {
     },
     
     build: {
-        outDir: '../dist', 
-        emptyOutDir: true, 
-        sourcemap: false 
+        outDir: '../dist',
+        emptyOutDir: true,
+        sourcemap: false,
+        // مجلد مُعرَّف ليميّز أصول المشروع عن أي build آخر يستخدم `assets` الافتراضي
+        assetsDir: 'Vatrena-assets',
     },
 
     worker: {
