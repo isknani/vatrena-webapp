@@ -36,7 +36,6 @@ import {
     getWallAlignYawOffsetForPath,
 } from './glb-models-data.js';
 import { setupScene } from './scene-setup.js';
-import { init2DBlueprint } from './blueprint-2d.js';
 import {
     createWallMeshStructure,
     rebuildWallGeometry,
@@ -5710,16 +5709,6 @@ function animate() {
 /* =========================================================================
    INITIALIZE SEPARATED MODULES
    ========================================================================= */
-// تشغيل وتفعيل نظام الرسم الهندسي وتمرير الدوال المطلوبة له
-init2DBlueprint(
-    () => scene,                   // دالة ترجع المشهد الحالي
-    () => currentRoomLength,       // دالة ترجع الطول الحالي
-    () => currentRoomWidth,        // دالة ترجع العرض الحالي
-    () => currentRoomPolygon,      // دالة ترجع مضلع الغرفة المخصصة إن وجد
-    isCabinet,                     // دالة فحص الكابينات
-    smartSaveImage                 // دالة الحفظ الذكية للصور
-);
-
 // إضافة تشغيل وتفعيل نظام الرندر الموصول بالسيرفر
 initRenderSystem({
     getScene: () => scene,
