@@ -12,13 +12,14 @@
 body {
     font-family: system-ui, -apple-system, "Segoe UI", Arial, "Tajawal", sans-serif;
     background-color: #f8f9fa;
-    overflow: hidden;
 }
 
+/* Document itself does not scroll — avoids scrollbar on the 3D designer */
 html, body {
     width: 100%;
     height: 100%;
     overflow: hidden;
+    overscroll-behavior: none;
 }
 
 button {
@@ -38,24 +39,57 @@ button:active {
    ========================================= */
 #setup-panel {
     width: 100%;
-    height: 100dvh;
+    min-height: 100svh;
+    min-height: 100dvh;
+    height: auto;
+    max-height: none;
     background:
         linear-gradient(rgba(10, 8, 18, 0.55), rgba(8, 6, 16, 0.58)),
         url('../thumbnails_vatrena/backgroundkitchen.png') center / cover no-repeat;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    align-items: center;
+    align-items: stretch;
     text-align: center;
-    padding: 20px;
     box-sizing: border-box;
     position: fixed;
     inset: 0;
     z-index: 100;
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    /* Extra space above software / gesture navigation bars on Android */
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px) + max(52px, 10vmin));
+}
+
+/* Scroll only inside input / dimensions UIs — not on body or #webgl-container */
+.scrollable-ui {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+}
+
+.setup-panel-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    width: 100%;
+    max-width: 360px;
+    margin: auto;
+    flex-shrink: 0;
+}
+
+.setup-panel-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 320px;
 }
 
 #setup-panel h1 {
-    font-size: 2.5rem;
+    font-size: clamp(1.35rem, 5.5vw, 2.5rem);
     color: #fff;
     margin: 0 0 12px;
     font-weight: 700;
@@ -63,8 +97,8 @@ button:active {
 }
 
 #setup-panel p {
-    font-size: 1.2rem;
-    margin-bottom: 30px;
+    font-size: clamp(0.95rem, 3.5vw, 1.2rem);
+    margin-bottom: clamp(14px, 3vh, 30px);
     color: #fff;
     opacity: 0.9;
 }
@@ -72,9 +106,10 @@ button:active {
 .dimensions-group {
     display: flex;
     flex-direction: column;
-    gap: 15px;
-    width: 320px;
-    margin-bottom: 25px;
+    gap: clamp(10px, 2.5vw, 15px);
+    width: 100%;
+    max-width: 320px;
+    margin-bottom: clamp(14px, 3vh, 25px);
 }
 
 .dimensions-group label {
@@ -135,20 +170,52 @@ button:active {
     transform: translateY(-2px);
 }
 
+.setup-panel-actions #custom-room-btn,
+.setup-panel-actions #start-design-btn,
+.setup-panel-actions #setup-back-btn {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-height: 560px) {
+    #setup-panel h1 {
+        margin-bottom: 6px;
+    }
+    .dimensions-group input {
+        padding: 10px 12px;
+        font-size: 1rem;
+    }
+    #start-design-btn,
+    #setup-back-btn {
+        padding: 11px 20px;
+        font-size: 1.05rem;
+    }
+}
+
 /* =========================================
    WebGL Container & Canvas
    ========================================= */
 #webgl-container {
     display: none;
     width: 100%;
+    height: 100%;
     height: 100dvh;
+    max-height: 100dvh;
+    min-height: 0;
     position: relative;
+    flex-direction: column;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
 }
 
 canvas.webgl {
     display: block;
     width: 100%;
     height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    touch-action: none;
 }
 
 /* =========================================
@@ -156,7 +223,9 @@ canvas.webgl {
    ========================================= */
 .controls-panel {
     width: 280px;
-    height: 100%;
+    max-height: 100vh;
+    max-height: 100dvh;
+    height: auto;
     background: #f4f6f8;
     font-family: 'Cairo', sans-serif;
     border-left: 1px solid #e0e0e0;
@@ -169,6 +238,9 @@ canvas.webgl {
     z-index: 10;
     display: flex;
     flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .controls-panel.show {
@@ -189,8 +261,8 @@ canvas.webgl {
 }
 
 .panel-content {
-    overflow-y: auto;
-    flex-grow: 1;
+    overflow-y: visible;
+    flex: 0 1 auto;
     padding: 15px; /* تباعد لإظهار القوائم بشكل منفصل */
     overscroll-behavior: contain;
     touch-action: pan-y;

@@ -57,7 +57,22 @@ const RUNPOD_API_KEY = "";
 
 
 // --- Scene Dimensions & State ---
-const sizes = { width: window.innerWidth, height: window.innerHeight };
+/** عرض لوحة جانبية بالبكسل على الشاشات الواسعة فقط؛ على الموبايل اللوحة طبقة فوق الكانفس ولا تُخصم من العرض */
+const SIDEBAR_LAYOUT_MIN_WIDTH = 768;
+const CONTROLS_PANEL_WIDTH_PX = 280;
+
+function readLayoutViewportSize() {
+    const doc = document.documentElement;
+    return {
+        width: Math.max(1, doc.clientWidth),
+        height: Math.max(1, doc.clientHeight),
+    };
+}
+
+const sizes = (() => {
+    const v = readLayoutViewportSize();
+    return { width: v.width, height: v.height };
+})();
 let currentRoomLength = 600;
 let currentRoomWidth = 500;
 let currentRoomHeight = 280;
@@ -339,21 +354,42 @@ const outputPass = new OutputPass();
 composer.addPass(outputPass);
 
 function recomputeCanvasSize() {
+    const { width: clientW, height: clientH } = readLayoutViewportSize();
     const panelVisible = controlsPanel?.classList.contains('show');
-    if (panelVisible) {
-        sizes.width = window.innerWidth - 280;
-    } else {
-        sizes.width = window.innerWidth;
+    const useSidebarInset =
+        panelVisible && clientW >= SIDEBAR_LAYOUT_MIN_WIDTH;
+
+    let w = useSidebarInset
+        ? Math.max(1, clientW - CONTROLS_PANEL_WIDTH_PX)
+        : clientW;
+    let h = clientH;
+
+    if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        if (rect.height > 1) {
+            h = rect.height;
+        } else if (webglContainer && webglContainer.offsetParent !== null) {
+            const ch = webglContainer.clientHeight;
+            if (ch > 1) h = ch;
+        }
+        if (!useSidebarInset && rect.width > 1) {
+            w = rect.width;
+        }
     }
-    sizes.height = window.innerHeight;
+
+    w = Math.max(1, Math.round(w));
+    h = Math.max(1, Math.round(h));
+
+    sizes.width = w;
+    sizes.height = h;
     camera.aspect = sizes.width / sizes.height;
     camera.updateProjectionMatrix();
     renderer.setSize(sizes.width, sizes.height);
     composer.setSize(sizes.width, sizes.height);
-    composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    
-    
-    
+    const pr = Math.min(window.devicePixelRatio || 1, 2);
+    renderer.setPixelRatio(pr);
+    composer.setPixelRatio(pr);
+
     if (typeof sharpenPass !== 'undefined') sharpenPass.uniforms.resolution.value.set(sizes.width, sizes.height);
     if (typeof sketchPass !== 'undefined') sketchPass.uniforms.resolution.value.set(sizes.width, sizes.height);
 }
@@ -2384,6 +2420,13 @@ toggleBottomPanelBtn?.addEventListener('click', () => {
 
 // --- Window Events ---
 window.addEventListener('resize', recomputeCanvasSize);
+window.addEventListener('orientationchange', () => {
+    requestAnimationFrame(recomputeCanvasSize);
+});
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', recomputeCanvasSize);
+    window.visualViewport.addEventListener('scroll', recomputeCanvasSize);
+}
 
 // --- Keyboard Events - اختصار Ctrl+Z للتراجع ---
 window.addEventListener('keydown', (e) => {
@@ -2560,7 +2603,7 @@ startDesignBtn.addEventListener('click', () => {
     setupPanel.style.display = 'none';
     loadingOverlay.style.display = 'flex';
     setTimeout(() => {
-        webglContainer.style.display = 'block';
+        webglContainer.style.display = 'flex';
         if (canvas) canvas.style.touchAction = 'none';
         createFloorAndWalls(currentRoomLength, currentRoomWidth);
         warmUpModelPipeline();
@@ -2573,7 +2616,7 @@ startDesignBtn.addEventListener('click', () => {
         loadDesignsList();
         animate();
         loadingOverlay.style.display = 'none';
-        
+        requestAnimationFrame(() => recomputeCanvasSize());
         // تهيئة زر Undo
         updateUndoButtonState();
     }, 50);
@@ -3552,7 +3595,7 @@ function startCustomDesign() {
     loadingOverlay.style.display = 'flex';
 
     setTimeout(() => {
-        webglContainer.style.display = 'block';
+        webglContainer.style.display = 'flex';
         if (canvas) canvas.style.touchAction = 'none';
         createCustomFloorAndWalls(centeredPoints);
         warmUpModelPipeline();
@@ -3565,6 +3608,7 @@ function startCustomDesign() {
         loadDesignsList();
         animate();
         loadingOverlay.style.display = 'none';
+        requestAnimationFrame(() => recomputeCanvasSize());
         updateUndoButtonState();
     }, 50);
 }

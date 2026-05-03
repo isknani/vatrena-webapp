@@ -2,10 +2,10 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>تصميم فاترينات المحلات   </title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-    <link rel="stylesheet" href="style.css?v=161" />
+    <link rel="stylesheet" href="style.css?v=164" />
     <link rel="preload" href="./draco_vatrena/draco_decoder.wasm" as="fetch" crossorigin />
     <link rel="preload" href="./get_model.php?file=vatrena%2Fv1.glb" as="fetch" crossorigin />
 </head>
@@ -16,24 +16,26 @@
         <p>جاري التحضير ...</p>
     </div>
 
-    <div id="setup-panel">
-        <h1>تصميم فاترينات المحلات  </h1>
-        <p>أدخل أبعاد المحل لبدء التصميم.</p>
-        <div class="dimensions-group">
-            <label for="roomLength">عمق المحل (سم):</label>
-    <input type="number" id="roomLength" value="600" min="100" />
-    <label for="roomWidth">عرض المحل (سم):</label>
-    <input type="number" id="roomWidth" value="500" min="100" />
-    <label for="roomHeight">ارتفاع المحل (سم):</label>
-    <input type="number" id="roomHeight" value="280" min="200" />
-        </div>
+    <div id="setup-panel" class="scrollable-ui">
+        <div class="setup-panel-inner">
+            <h1>تصميم فاترينات المحلات  </h1>
+            <p>أدخل أبعاد المحل لبدء التصميم.</p>
+            <div class="dimensions-group">
+                <label for="roomLength">عمق المحل (سم):</label>
+                <input type="number" id="roomLength" value="600" min="100" />
+                <label for="roomWidth">عرض المحل (سم):</label>
+                <input type="number" id="roomWidth" value="500" min="100" />
+                <label for="roomHeight">ارتفاع المحل (سم):</label>
+                <input type="number" id="roomHeight" value="280" min="200" />
+            </div>
 
-        <div style="display: flex; gap: 15px; flex-direction: column; width: 320px;">
-            <button id="custom-room-btn" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; padding:14px 28px; font-size:1.1rem; font-weight:700; border:none; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; box-shadow:0 4px 15px rgba(118,75,162,0.4); transition:all 0.3s ease;">
-                <i class="fas fa-pencil-ruler"></i> إنشاء جدران مخصصة
-            </button>
-            <button id="start-design-btn">ابدأ التصميم</button>
-            <a href="dashboard.php" id="setup-back-btn">رجوع</a>
+            <div class="setup-panel-actions">
+                <button id="custom-room-btn" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; padding:14px 28px; font-size:1.1rem; font-weight:700; border:none; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; box-shadow:0 4px 15px rgba(118,75,162,0.4); transition:all 0.3s ease;">
+                    <i class="fas fa-pencil-ruler"></i> إنشاء جدران مخصصة
+                </button>
+                <button id="start-design-btn">ابدأ التصميم</button>
+                <a href="dashboard.php" id="setup-back-btn">رجوع</a>
+            </div>
         </div>
     </div>
 
@@ -540,7 +542,7 @@
 
 </div>
 
-     <script type="module" src="script.js?v=159"></script>
+     <script type="module" src="script.js?v=160"></script>
 
 <!-- ===== CUSTOM ROOM BUILDER OVERLAY ===== -->
 <div id="custom-room-overlay" style="display: none; background:#12121f; background-color:#12121f;">
