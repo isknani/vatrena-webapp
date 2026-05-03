@@ -364,17 +364,16 @@ function recomputeCanvasSize() {
         : clientW;
     let h = clientH;
 
-    if (canvas) {
-        const rect = canvas.getBoundingClientRect();
-        if (rect.height > 1) {
-            h = rect.height;
-        } else if (webglContainer && webglContainer.offsetParent !== null) {
-            const ch = webglContainer.clientHeight;
-            if (ch > 1) h = ch;
+    /** عرض/ارتفاع الحاوية وليس getBoundingClientRect على الـ canvas حتى لا نقرأ بعد إغلاق اللوحة عرضاً قديماً ما زال مطبقاً على عنصر الـ canvas من setSize السابق */
+    if (webglContainer) {
+        const cw = webglContainer.clientWidth;
+        const ch = webglContainer.clientHeight;
+        if (cw > 1) {
+            w = useSidebarInset
+                ? Math.max(1, cw - CONTROLS_PANEL_WIDTH_PX)
+                : cw;
         }
-        if (!useSidebarInset && rect.width > 1) {
-            w = rect.width;
-        }
+        if (ch > 1) h = ch;
     }
 
     w = Math.max(1, Math.round(w));
@@ -5100,8 +5099,9 @@ function applyWebViewScrollFix(element) {
     }, { passive: false });
 }
 
-// تطبيق الإصلاح على .panel-content
-document.querySelectorAll('.panel-content').forEach(applyWebViewScrollFix);
+// تطبيق الإصلاح على حاوية السكرول الفعلية (.controls-panel) وليس .panel-content
+// (بعد تغيير CSS أصبح السكروال على اللوحة كاملة فالمستمع القديم على panel-content كان يمنع preventDefault دون تحريك scroll)
+if (controlsPanel) applyWebViewScrollFix(controlsPanel);
 
 // تطبيق الإصلاح على .collapsible-content عند فتحها
 const collapsibleObserver = new MutationObserver((mutations) => {
